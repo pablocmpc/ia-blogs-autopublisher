@@ -1,0 +1,45 @@
+name: Informe Semanal por Email
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Lunes 10:00 España (08:00 UTC)
+  workflow_dispatch:
+
+jobs:
+  informe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install requests
+
+      - name: Crear config.json
+        working-directory: auto-publisher
+        env:
+          CONFIG_JSON: ${{ secrets.CONFIG_JSON }}
+        run: echo "$CONFIG_JSON" > config.json
+
+      - name: Generar informe semanal
+        working-directory: auto-publisher
+        run: python informe-semanal.py
+
+      - name: Enviar informe por email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "📊 Informe semanal IA Blogs — ${{ github.run_number }}"
+          to: wizangospain@gmail.com
+          from: "IA Blogs Bot <${{ secrets.GMAIL_USER }}>"
+          html_body: file://auto-publisher/informe-email.html

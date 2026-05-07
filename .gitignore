@@ -1,0 +1,19 @@
+# CREDENCIALES — NUNCA subir al repositorio
+auto-publisher/config.json
+
+# Archivos generados
+auto-publisher/publicaciones.csv
+auto-publisher/dashboard.html
+auto-publisher/metrics.json
+auto-publisher/informe-email.html
+
+# Fotos y assets locales (no necesarios para la automatización)
+assets/
+
+# Archivos del sistema
+.DS_Store
+*.DS_Store
+Thumbs.db
+
+# Archivos locales de Claude Code
+.claude/

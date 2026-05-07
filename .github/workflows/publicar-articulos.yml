@@ -1,0 +1,49 @@
+name: Publicar Artículos IA (7 turnos/día)
+
+# Ejecuta 7 veces al día en horario español (UTC+2 en verano)
+# UTC times = hora española - 2
+on:
+  schedule:
+    - cron: '0 5 * * *'   # 07:00 España
+    - cron: '30 7 * * *'  # 09:30 España
+    - cron: '0 10 * * *'  # 12:00 España
+    - cron: '30 12 * * *' # 14:30 España
+    - cron: '0 15 * * *'  # 17:00 España
+    - cron: '30 17 * * *' # 19:30 España
+    - cron: '30 19 * * *' # 21:30 España
+  workflow_dispatch:       # Permite ejecutar manualmente desde GitHub
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install requests
+
+      - name: Crear config.json desde secrets
+        working-directory: auto-publisher
+        env:
+          CONFIG_JSON: ${{ secrets.CONFIG_JSON }}
+        run: echo "$CONFIG_JSON" > config.json
+
+      - name: Publicar 1 artículo por web (3 total)
+        working-directory: auto-publisher
+        run: python publisher.py 1
+
+      - name: Subir log de publicaciones
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publicaciones-log-${{ github.run_id }}
+          path: auto-publisher/publicaciones.csv
+          retention-days: 30
