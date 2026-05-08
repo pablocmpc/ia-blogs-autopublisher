@@ -1,0 +1,33 @@
+name: Newsletter Semanal (Lunes 9:00 España)
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'   # Lunes 9:00 España (UTC+2 = 7:00 UTC)
+  workflow_dispatch:        # Ejecutar manualmente si hace falta
+
+jobs:
+  newsletter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install requests
+
+      - name: Crear config.json desde secrets
+        working-directory: auto-publisher
+        env:
+          CONFIG_JSON: ${{ secrets.CONFIG_JSON }}
+        run: echo "$CONFIG_JSON" > config.json
+
+      - name: Enviar newsletter semanal
+        working-directory: auto-publisher
+        run: python newsletter-semanal.py

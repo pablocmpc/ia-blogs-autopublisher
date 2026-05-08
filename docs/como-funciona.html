@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cómo Funciona el Auto-Publisher IA</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#fff;color:#111;line-height:1.65;font-size:14px;max-width:800px;margin:0 auto;padding:2rem 1.5rem}
+@media print{body{padding:0;max-width:100%}.no-print{display:none!important}@page{margin:2cm}}
+.no-print{text-align:center;margin-bottom:1.5rem}
+.print-btn{background:#111;color:#fff;border:none;padding:.75rem 2rem;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer}
+h1{font-size:2rem;font-weight:800;margin-bottom:.3rem;line-height:1.1}
+.subtitle{color:#64748b;font-size:1rem;margin-bottom:2rem}
+.cover-box{background:linear-gradient(135deg,#0f172a,#1e3a5f);color:#fff;border-radius:16px;padding:2.5rem;margin-bottom:2.5rem;position:relative;overflow:hidden}
+.cover-box::after{content:'🤖';position:absolute;right:2rem;top:50%;transform:translateY(-50%);font-size:5rem;opacity:.15}
+.cover-title{font-size:1.8rem;font-weight:800;margin-bottom:.5rem}
+.cover-sub{color:#94a3b8;font-size:.95rem}
+.cover-tags{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.2rem}
+.tag{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);color:#e2e8f0;padding:.25rem .75rem;border-radius:20px;font-size:.75rem;font-weight:600}
+h2{font-size:1.25rem;font-weight:800;margin:2.5rem 0 1rem;padding-bottom:.5rem;border-bottom:2px solid #f1f5f9;display:flex;align-items:center;gap:.5rem}
+h3{font-size:1rem;font-weight:700;margin:1.5rem 0 .5rem;color:#1e40af}
+p{margin-bottom:.75rem;color:#374151}
+ul,ol{margin:.5rem 0 .75rem 1.5rem;color:#374151}
+li{margin-bottom:.3rem}
+.step-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin:1rem 0}
+.step{border:1px solid #e2e8f0;border-radius:10px;padding:1rem;position:relative}
+.step-num{position:absolute;top:-12px;left:1rem;background:#3b82f6;color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:800}
+.step-title{font-weight:700;font-size:.88rem;margin-bottom:.4rem;padding-top:.2rem}
+.step-desc{font-size:.78rem;color:#64748b;line-height:1.5}
+.highlight{background:#eff6ff;border-left:4px solid #3b82f6;padding:.75rem 1rem;border-radius:0 8px 8px 0;margin:1rem 0}
+.highlight strong{color:#1e40af}
+.money{background:#f0fdf4;border-left:4px solid #22c55e;padding:.75rem 1rem;border-radius:0 8px 8px 0;margin:1rem 0}
+.money strong{color:#15803d}
+.warn{background:#fff7ed;border-left:4px solid #f97316;padding:.75rem 1rem;border-radius:0 8px 8px 0;margin:1rem 0}
+.warn strong{color:#c2410c}
+table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.82rem}
+th{background:#f8fafc;font-weight:700;padding:.6rem .75rem;text-align:left;border:1px solid #e2e8f0;color:#374151}
+td{padding:.55rem .75rem;border:1px solid #e2e8f0;color:#374151}
+tr:nth-child(even) td{background:#f8fafc}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;margin:1rem 0;font-size:.82rem}
+.flow-box{background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px;padding:.35rem .8rem;font-weight:600;white-space:nowrap}
+.flow-arrow{color:#94a3b8;font-size:1.1rem}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.7rem;margin:1rem 0}
+.kpi{border:1px solid #e2e8f0;border-radius:10px;padding:.9rem;text-align:center}
+.kpi-val{font-size:1.8rem;font-weight:800;line-height:1;margin-bottom:.2rem}
+.kpi-lbl{font-size:.68rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.07em}
+.footer{margin-top:3rem;padding-top:1rem;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:.75rem;text-align:center}
+</style>
+</head>
+<body>
+
+<div class="no-print">
+  <button class="print-btn" onclick="window.print()">🖨️ Guardar como PDF (Ctrl+P)</button>
+</div>
+
+<div class="cover-box">
+  <div class="cover-title">Auto-Publisher IA</div>
+  <div class="cover-sub">Sistema de publicación automática de contenido SEO<br>para múltiples sitios web con inteligencia artificial</div>
+  <div class="cover-tags">
+    <span class="tag">3 webs activas</span>
+    <span class="tag">21 artículos/día</span>
+    <span class="tag">630 artículos/mes</span>
+    <span class="tag">100% automático</span>
+    <span class="tag">Sin coste de IA</span>
+  </div>
+</div>
+
+<h2>📌 ¿Qué hace este sistema?</h2>
+<p>El Auto-Publisher IA es un sistema que genera y publica artículos de blog de forma completamente automática en 3 sitios web WordPress, <strong>7 veces al día, 365 días al año</strong>, sin intervención humana.</p>
+<p>El sistema usa inteligencia artificial para escribir artículos SEO de alta calidad en español, busca imágenes relevantes automáticamente, y los publica directamente en WordPress. Todo esto de forma gratuita usando GitHub Actions como servidor.</p>
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="kpi-val" style="color:#3b82f6">21</div><div class="kpi-lbl">Artículos/día</div></div>
+  <div class="kpi"><div class="kpi-val" style="color:#22c55e">630</div><div class="kpi-lbl">Artículos/mes</div></div>
+  <div class="kpi"><div class="kpi-val" style="color:#f97316">7.560</div><div class="kpi-lbl">Artículos/año</div></div>
+  <div class="kpi"><div class="kpi-val" style="color:#8b5cf6">0€</div><div class="kpi-lbl">Coste servidor</div></div>
+</div>
+
+<h2>🔧 ¿Cómo funciona? — Paso a paso</h2>
+
+<div class="step-grid">
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-title">⏰ GitHub dispara el cron</div>
+    <div class="step-desc">A las 07:00, 09:30, 12:00, 14:30, 17:00, 19:30 y 21:30 hora española, GitHub Actions lanza automáticamente el sistema.</div>
+  </div>
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-title">🔑 Selecciona keyword</div>
+    <div class="step-desc">Para cada web, elige aleatoriamente una keyword de su lista (75-200 temas por web). Nunca repite la misma dos veces.</div>
+  </div>
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-title">🤖 IA genera el artículo</div>
+    <div class="step-desc">Envía la keyword a Groq AI (gratis). En 30 segundos devuelve un artículo completo de 1.500-2.200 palabras con estructura SEO.</div>
+  </div>
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-title">🖼️ Busca imagen</div>
+    <div class="step-desc">Busca una foto relevante y libre de derechos en Pexels API (gratis). La descarga y la sube al WordPress de cada web.</div>
+  </div>
+  <div class="step">
+    <div class="step-num">5</div>
+    <div class="step-title">📝 Publica en WordPress</div>
+    <div class="step-desc">Crea el post directamente via WordPress REST API con título SEO, URL amigable, categoría, etiquetas y meta descripción.</div>
+  </div>
+  <div class="step">
+    <div class="step-num">6</div>
+    <div class="step-title">📌 Pin en Pinterest</div>
+    <div class="step-desc">Si Pinterest está configurado, crea automáticamente un pin enlazando al artículo. Más tráfico sin esfuerzo extra.</div>
+  </div>
+</div>
+
+<div class="flow">
+  <div class="flow-box">GitHub Cron (gratis)</div><div class="flow-arrow">→</div>
+  <div class="flow-box">Groq AI (gratis)</div><div class="flow-arrow">→</div>
+  <div class="flow-box">Pexels API (gratis)</div><div class="flow-arrow">→</div>
+  <div class="flow-box">WordPress API</div><div class="flow-arrow">→</div>
+  <div class="flow-box">Pinterest (opcional)</div>
+</div>
+
+<h2>📁 Los 3 sitios web</h2>
+<table>
+  <thead><tr><th>Web</th><th>Temática</th><th>Keywords activas</th><th>Artículos/día</th></tr></thead>
+  <tbody>
+    <tr><td><strong>iaparaprincipiantes.es</strong></td><td>IA para principiantes, herramientas, tutoriales</td><td>75 topics</td><td>7</td></tr>
+    <tr><td><strong>superprompts.es</strong></td><td>Prompts de IA, ChatGPT, Claude, productividad</td><td>60 topics</td><td>7</td></tr>
+    <tr><td><strong>guiaclaude.es</strong></td><td>Claude AI, Anthropic, casos de uso</td><td>60 topics</td><td>7</td></tr>
+  </tbody>
+</table>
+
+<h2>💰 Modelo de monetización</h2>
+<h3>1. Google AdSense (ya instalado)</h3>
+<p>Con tráfico orgánico de Google, los anuncios generan ingresos pasivos por cada visita. La clave es volumen de artículos + posicionamiento SEO.</p>
+<table>
+  <thead><tr><th>Visitantes/mes</th><th>RPM estimado</th><th>Ingresos estimados</th></tr></thead>
+  <tbody>
+    <tr><td>10.000</td><td>2-4€</td><td>20-40€/mes</td></tr>
+    <tr><td>50.000</td><td>3-5€</td><td>150-250€/mes</td></tr>
+    <tr><td>200.000</td><td>4-6€</td><td>800-1.200€/mes</td></tr>
+    <tr><td>1.000.000</td><td>5-8€</td><td>5.000-8.000€/mes</td></tr>
+  </tbody>
+</table>
+<h3>2. Afiliados (Amazon, Hotmart, etc.)</h3>
+<p>En artículos que mencionan herramientas de IA, incluir enlaces de afiliado puede generar 5-20€ por venta referida.</p>
+<h3>3. Recursos digitales / Lead magnets</h3>
+<p>Páginas de descarga gratuita (kit-starter, prompts-gratis, recursos-gratis) capturas emails para vender productos propios.</p>
+
+<div class="money">
+  <strong>Proyección a 12 meses:</strong> Con 7.560 artículos publicados y posicionamiento orgánico progresivo, el escenario conservador son 3.000-8.000 visitantes/mes por web (total 9.000-24.000). Ingresos estimados: <strong>150-500€/mes por web</strong> en AdSense + afiliados.
+</div>
+
+<h2>🛠️ Herramientas usadas (coste total: ~0€/mes)</h2>
+<table>
+  <thead><tr><th>Herramienta</th><th>Para qué</th><th>Coste</th></tr></thead>
+  <tbody>
+    <tr><td>GitHub Actions</td><td>Servidor de automatización (cron jobs)</td><td>Gratis (2.000 min/mes)</td></tr>
+    <tr><td>Groq API</td><td>Generar artículos con LLaMA 3.3 70B</td><td>Gratis (rate limit generoso)</td></tr>
+    <tr><td>Pexels API</td><td>Imágenes libres de derechos</td><td>Gratis</td></tr>
+    <tr><td>WordPress REST API</td><td>Publicar posts automáticamente</td><td>Incluido en hosting</td></tr>
+    <tr><td>Hosting Hostinger</td><td>Alojamiento de las 3 webs</td><td>~12€/mes (3 webs)</td></tr>
+    <tr><td>Pinterest API</td><td>Crear pins automáticamente</td><td>Gratis</td></tr>
+  </tbody>
+</table>
+
+<h2>📊 Dashboard de control</h2>
+<p>El sistema incluye un panel de control accesible desde cualquier dispositivo (móvil, tablet, PC) en tiempo real:</p>
+<ul>
+  <li>📋 Listado de todos los artículos publicados con fecha y URL</li>
+  <li>⏰ Próximas ejecuciones programadas</li>
+  <li>🔄 Estado en vivo de GitHub Actions (verde = OK, rojo = error)</li>
+  <li>🔑 Keywords disponibles por web</li>
+  <li>⚡ Botón para publicar manualmente en cualquier momento</li>
+</ul>
+
+<div class="highlight">
+  <strong>URL del dashboard (móvil):</strong> pablocmpc.github.io/ia-blogs-autopublisher<br>
+  Funciona desde cualquier lugar sin necesidad de encender el PC.
+</div>
+
+<h2>⚙️ ¿Qué necesita el usuario para operarlo?</h2>
+<p><strong>Nada.</strong> El sistema es 100% autónomo. Sin embargo, para mejores resultados se recomienda:</p>
+<ul>
+  <li>Revisar el dashboard 1 vez/semana para confirmar que todo está verde</li>
+  <li>Añadir nuevas keywords al banco cuando se agoten (cada ~2-3 meses)</li>
+  <li>Revisar Google Search Console mensualmente para ver qué términos posicionan</li>
+  <li>Cuando AdSense genere ingresos, optimizar los artículos que más tráfico traigan</li>
+</ul>
+
+<h2>🚀 Escalabilidad</h2>
+<p>El mismo sistema se puede ampliar fácilmente:</p>
+<ul>
+  <li>Añadir más webs WordPress (solo hay que añadir credenciales en config.json)</li>
+  <li>Aumentar a 3 artículos por turno (de 21 a 63/día) cambiando un número</li>
+  <li>Conectar Instagram y Facebook para publicar en redes sociales automáticamente</li>
+  <li>Añadir envío automático de newsletters con los artículos de la semana</li>
+  <li>Vender el sistema como servicio a otras empresas</li>
+</ul>
+
+<div class="money">
+  <strong>Modelo SaaS:</strong> Este mismo sistema configurado para el negocio de un cliente tiene un valor de mercado de 500-1.500€ de setup + 200-400€/mes de mantenimiento. Con 10 clientes: 2.000-4.000€/mes recurrentes.
+</div>
+
+<div class="footer">
+  Auto-Publisher IA · Sistema de publicación automática con inteligencia artificial<br>
+  Desarrollado con GitHub Actions + Groq AI + WordPress REST API · Mayo 2026
+</div>
+
+</body>
+</html>

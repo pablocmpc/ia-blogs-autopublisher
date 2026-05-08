@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Dashboard — Auto-Publisher IA</title>
+<meta name="theme-color" content="#0f172a">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f172a;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;-webkit-font-smoothing:antialiased}
+.bar{background:#1e293b;border-bottom:1px solid #334155;padding:.9rem 1.2rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:99;gap:.8rem}
+.bar-l{display:flex;align-items:center;gap:.6rem;min-width:0}
+.dot{width:9px;height:9px;background:#22c55e;border-radius:50%;flex-shrink:0;animation:lp 1.8s ease-in-out infinite}
+@keyframes lp{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}60%{box-shadow:0 0 0 6px rgba(34,197,94,0)}}
+.logo{font-weight:800;font-size:.95rem;white-space:nowrap}.logo em{color:#3b82f6;font-style:normal}
+.badge{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);color:#22c55e;padding:.15rem .55rem;border-radius:4px;font-size:.65rem;font-weight:700;flex-shrink:0}
+.clock{font-size:.72rem;color:#475569;font-variant-numeric:tabular-nums;white-space:nowrap}
+.wrap{padding:1rem}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:.7rem;margin-bottom:1rem}
+@media(min-width:500px){.stats{grid-template-columns:repeat(4,1fr)}}
+.stat{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:1rem;text-align:center}
+.sv{font-size:2rem;font-weight:800;line-height:1;margin-bottom:.2rem}
+.sl{font-size:.65rem;color:#64748b;text-transform:uppercase;letter-spacing:.07em}
+.card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:1rem;margin-bottom:.8rem}
+.ct{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#475569;margin-bottom:.8rem;display:flex;align-items:center;gap:.4rem}
+.btn-row{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1rem}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.4rem;padding:.65rem 1rem;border-radius:8px;font-size:.82rem;font-weight:700;text-decoration:none;transition:opacity .2s;flex:1;text-align:center}
+.btn:active{opacity:.75}
+.btn-b{background:linear-gradient(135deg,#3b82f6,#6366f1);color:#fff}
+.btn-g{background:linear-gradient(135deg,#22c55e,#16a34a);color:#000}
+.btn-o{background:linear-gradient(135deg,#f97316,#ea580c);color:#fff}
+.gh-item{background:#0f172a;border:1px solid #334155;border-radius:7px;padding:.7rem;display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem}
+.gh-name{font-size:.78rem;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.gh-meta{font-size:.68rem;color:#475569;margin-top:.1rem}
+.gh-link{color:#3b82f6;font-size:.7rem;text-decoration:none;white-space:nowrap;flex-shrink:0}
+.gh-ico{font-size:1.2rem;flex-shrink:0}
+.next-item{display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid #0f172a}
+.next-item:last-child{border-bottom:none}
+.note{font-size:.72rem;color:#334155;margin-top:.7rem;line-height:1.6;padding:.6rem;background:#0f172a;border-radius:6px}
+table{width:100%;border-collapse:collapse}
+th{font-size:.62rem;color:#334155;text-transform:uppercase;padding:.4rem .5rem;text-align:left;border-bottom:1px solid #334155}
+td{padding:.5rem .5rem;border-bottom:1px solid #0f172a;font-size:.75rem;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.kw-row{margin-bottom:.7rem}
+.kw-label{display:flex;justify-content:space-between;margin-bottom:.25rem;font-size:.78rem}
+.kw-bar{background:#0f172a;border-radius:3px;height:5px}
+.kw-fill{height:100%;border-radius:3px}
+.site-link{display:flex;align-items:center;gap:.4rem;color:#60a5fa;font-size:.8rem;padding:.3rem 0;text-decoration:none}
+.divider{border:none;border-top:1px solid #334155;margin:.8rem 0}
+#loader{text-align:center;padding:2rem;color:#334155;font-size:.85rem}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="bar-l">
+    <div class="dot"></div>
+    <div class="logo">Auto-Publisher <em>IA</em></div>
+    <span class="badge">LIVE</span>
+  </div>
+  <span class="clock" id="clk">--:--:-- España</span>
+</div>
+
+<div class="wrap">
+
+  <!-- Botones de acción -->
+  <div class="btn-row">
+    <a href="https://github.com/pablocmpc/ia-blogs-autopublisher/actions" target="_blank" class="btn btn-b">📊 Ver logs</a>
+    <a href="https://github.com/pablocmpc/ia-blogs-autopublisher/actions/workflows/publicar-articulos.yml" target="_blank" class="btn btn-g">⚡ Publicar ya</a>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat"><div class="sv" style="color:#3b82f6" id="s-total">—</div><div class="sl">Publicados</div></div>
+    <div class="stat"><div class="sv" style="color:#22c55e" id="s-ok">—</div><div class="sl">Exitosos</div></div>
+    <div class="stat"><div class="sv" style="color:#f97316" id="s-fail">—</div><div class="sl">Fallidos</div></div>
+    <div class="stat"><div class="sv" style="color:#8b5cf6">3</div><div class="sl">Webs activas</div></div>
+  </div>
+
+  <!-- GitHub Actions runs -->
+  <div class="card">
+    <div class="ct">🔄 Ejecuciones recientes <span id="gh-st" style="font-weight:400;color:#334155;margin-left:auto">cargando...</span></div>
+    <div id="gh-runs"><div id="loader">Consultando GitHub...</div></div>
+  </div>
+
+  <!-- Próximas publicaciones -->
+  <div class="card">
+    <div class="ct">⏰ Próximas publicaciones (hora España)</div>
+    <div id="nexts"></div>
+    <div class="note">⚙️ GitHub Actions puede tener hasta 90 min de delay en repos con poco tráfico. Se refresca solo.</div>
+  </div>
+
+  <!-- Webs -->
+  <div class="card">
+    <div class="ct">🌐 Tus webs</div>
+    <a href="https://iaparaprincipiantes.es" target="_blank" class="site-link">↗ iaparaprincipiantes.es</a>
+    <a href="https://superprompts.es" target="_blank" class="site-link">↗ superprompts.es</a>
+    <a href="https://guiaclaude.es" target="_blank" class="site-link">↗ guiaclaude.es</a>
+    <hr class="divider">
+    <a href="https://github.com/pablocmpc/ia-blogs-autopublisher" target="_blank" class="site-link" style="color:#64748b;font-size:.72rem">↗ Repositorio GitHub</a>
+  </div>
+
+  <!-- Horarios completos -->
+  <div class="card">
+    <div class="ct">📅 Horario diario (7 turnos)</div>
+    <table>
+      <thead><tr><th>Hora España</th><th>Webs</th><th>Artículos</th></tr></thead>
+      <tbody>
+        <tr><td>07:00</td><td>Las 3</td><td>3 (1 c/u)</td></tr>
+        <tr><td>09:30</td><td>Las 3</td><td>3 (1 c/u)</td></tr>
+        <tr><td>12:00</td><td>Las 3</td><td>3 (1 c/u)</td></tr>
+        <tr><td>14:30</td><td>Las 3</td><td>3 (1 c/u)</td></tr>
+        <tr><td>17:00</td><td>Las 3</td><td>3 (1 c/u)</td></tr>
+        <tr><td>19:30</td><td>Las 3</td><td>3 (1 c/u)</td></tr>
+        <tr><td>21:30</td><td>Las 3</td><td>3 (1 c/u)</td></tr>
+      </tbody>
+    </table>
+    <div class="note" style="margin-top:.7rem">Total: <strong style="color:#22c55e">21 artículos/día · 630/mes</strong></div>
+  </div>
+
+</div>
+
+<script>
+const REPO = 'pablocmpc/ia-blogs-autopublisher';
+
+// Reloj
+function tick(){
+  const d=new Date();
+  const e=new Date(d.toLocaleString('en-US',{timeZone:'Europe/Madrid'}));
+  const p=n=>String(n).padStart(2,'0');
+  document.getElementById('clk').textContent=
+    p(e.getHours())+':'+p(e.getMinutes())+':'+p(e.getSeconds())+' España';
+}
+setInterval(tick,1000); tick();
+
+// Próximas ejecuciones
+const SCHED=[[7,0],[9,30],[12,0],[14,30],[17,0],[19,30],[21,30]];
+function renderNexts(){
+  const now=new Date();
+  const esp=new Date(now.toLocaleString('en-US',{timeZone:'Europe/Madrid'}));
+  const h=esp.getHours(), m=esp.getMinutes();
+  let html='';
+  let shown=0;
+  for(const [sh,sm] of SCHED){
+    if(sh>h||(sh===h&&sm>m)){
+      const diff=(sh-h)*60+(sm-m);
+      const label=diff>=60?`${Math.floor(diff/60)}h ${diff%60}m`:`${diff}m`;
+      html+=`<div class="next-item">
+        <span style="font-size:.84rem">⏰ ${String(sh).padStart(2,'0')}:${String(sm).padStart(2,'0')}</span>
+        <span style="color:#22c55e;font-weight:700;font-size:.82rem">en ${label}</span>
+      </div>`;
+      if(++shown>=3) break;
+    }
+  }
+  if(!html) html='<div style="color:#475569;font-size:.82rem;padding:.4rem 0">Mañana desde las 07:00</div>';
+  document.getElementById('nexts').innerHTML=html;
+}
+renderNexts(); setInterval(renderNexts,30000);
+
+// GitHub Actions
+const ICONS={completed:'✅',success:'✅',in_progress:'🔄',queued:'⏳',failure:'❌',cancelled:'⚫',skipped:'➖'};
+const COLORS={completed:'#22c55e',success:'#22c55e',in_progress:'#3b82f6',queued:'#f59e0b',failure:'#ef4444',cancelled:'#475569'};
+
+async function loadRuns(){
+  try{
+    const r=await fetch(`https://api.github.com/repos/${REPO}/actions/runs?per_page=8`,{
+      headers:{Accept:'application/vnd.github.v3+json'}
+    });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    const runs=data.workflow_runs||[];
+    const total=runs.length;
+    const ok=runs.filter(r=>r.conclusion==='success').length;
+    const fail=runs.filter(r=>r.conclusion==='failure').length;
+    document.getElementById('s-total').textContent=total;
+    document.getElementById('s-ok').textContent=ok;
+    document.getElementById('s-fail').textContent=fail;
+    document.getElementById('gh-st').textContent=total+' encontradas';
+    let html='';
+    for(const run of runs){
+      const status=run.conclusion||run.status||'queued';
+      const icon=ICONS[status]||'❓';
+      const color=COLORS[status]||'#64748b';
+      const esp=new Date(run.created_at).toLocaleString('es-ES',{timeZone:'Europe/Madrid',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      html+=`<div class="gh-item">
+        <span class="gh-ico">${icon}</span>
+        <div style="flex:1;min-width:0">
+          <div class="gh-name">${run.name||run.display_title||'Workflow'}</div>
+          <div class="gh-meta">${esp} · <span style="color:${color}">${status}</span></div>
+        </div>
+        <a href="${run.html_url}" target="_blank" class="gh-link">logs →</a>
+      </div>`;
+    }
+    document.getElementById('gh-runs').innerHTML=html||'<div style="color:#334155;font-size:.8rem">Sin ejecuciones todavía</div>';
+  }catch(e){
+    document.getElementById('gh-runs').innerHTML=`<div style="color:#ef4444;font-size:.78rem">Error: ${e.message}<br><span style="color:#475569">Puede ser límite de rate de GitHub API (60 req/h sin login)</span></div>`;
+    document.getElementById('gh-st').textContent='error';
+  }
+}
+loadRuns(); setInterval(loadRuns,30000);
+
+// Auto-refresh completo cada 5 min
+setTimeout(()=>location.reload(),300000);
+</script>
+</body>
+</html>

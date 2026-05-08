@@ -8,6 +8,8 @@
   <?php wp_head(); ?>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
+    body>header,#masthead,.site-header,.ast-header-break-point,.hestia-header,.header-section,.header-wrapper,#site-header,.custom-header,.site-branding,#wpadminbar{display:none!important;}
+    html{margin-top:0!important;}body.admin-bar,body.logged-in{margin-top:0!important;padding-top:0!important;}
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
     :root{--bg:#0C0C0E;--bg2:#141416;--bg3:#1C1C20;--orange:#F97316;--orange2:#EA580C;--amber:#FBBF24;--coral:#FB923C;--text:#FAFAFA;--text2:#A1A1AA;--text3:#52525B;--border:rgba(249,115,22,0.15);--border2:rgba(249,115,22,0.08);}
     html{scroll-behavior:smooth;}
@@ -236,8 +238,8 @@
     <div class="nl-icon">🧡</div>
     <h2 class="nl-title">Lo mejor de Claude<br><span style="color:var(--orange)">cada semana en tu email</span></h2>
     <p class="nl-sub">Novedades, tutoriales y trucos de Claude antes que nadie. En español y gratis.</p>
-    <form class="nl-form" onsubmit="return false;"><input type="email" placeholder="tu@email.com" required><button type="submit">Suscribirme →</button></form>
-    <p style="font-size:.75rem;color:var(--text3);margin-top:.75rem;">Sin spam · Baja cuando quieras</p>
+    <form class="nl-form" id="nl-form-gc"><input type="email" id="nl-email-gc" placeholder="tu@email.com" required><button type="submit" id="nl-btn-gc">Suscribirme →</button></form>
+    <p id="nl-msg-gc" style="font-size:.75rem;color:var(--text3);margin-top:.75rem;">Sin spam · Baja cuando quieras</p>
   </div></div></section>
   <footer><div class="footer-inner">
     <a href="#" class="footer-logo">Guía<span>Claude</span></a>
@@ -257,6 +259,18 @@
     const cObs=new IntersectionObserver(e=>{e.forEach(entry=>{if(!entry.isIntersecting)return;const el=entry.target,target=+el.dataset.count;let cur=0;const step=target/(1500/16);const t=setInterval(()=>{cur=Math.min(cur+step,target);el.textContent=target===100?Math.floor(cur)+'%':Math.floor(cur)+'+';if(cur>=target)clearInterval(t);},16);cObs.unobserve(el);});},{threshold:.5});
     document.querySelectorAll('.stat-num').forEach(el=>cObs.observe(el));
     window.addEventListener('scroll',()=>{document.querySelectorAll('.orb').forEach((o,i)=>{o.style.transform=`translateY(${window.scrollY*(i===0?.15:-.1)}px)`;});},{passive:true});
+    document.getElementById('nl-form-gc').addEventListener('submit',async function(e){
+      e.preventDefault();
+      var btn=document.getElementById('nl-btn-gc'),msg=document.getElementById('nl-msg-gc'),email=document.getElementById('nl-email-gc').value.trim();
+      btn.textContent='Enviando...';btn.disabled=true;
+      try{
+        var r=await fetch('<?php echo esc_url(rest_url("newsletter/v1/subscribe")); ?>',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,site:'guiaclaude'})});
+        var d=await r.json();
+        if(d.success){btn.textContent='✓ ¡Suscrito!';btn.style.background='#22c55e';document.getElementById('nl-email-gc').value='';}
+        else{btn.textContent='Error - Reintentar';btn.disabled=false;}
+        msg.textContent=d.message||msg.textContent;
+      }catch(err){btn.textContent='Reintentar';btn.disabled=false;}
+    });
   </script>
 </body>
 </html>

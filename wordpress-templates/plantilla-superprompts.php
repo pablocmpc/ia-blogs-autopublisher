@@ -8,6 +8,8 @@
   <?php wp_head(); ?>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
+    body>header,#masthead,.site-header,.ast-header-break-point,.hestia-header,.header-section,.header-wrapper,#site-header,.custom-header,.site-branding,#wpadminbar{display:none!important;}
+    html{margin-top:0!important;}body.admin-bar,body.logged-in{margin-top:0!important;padding-top:0!important;}
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
     :root{--bg:#030712;--bg2:#060D1A;--bg3:#0A1628;--green:#10B981;--green2:#059669;--cyan:#06B6D4;--yellow:#FBBF24;--text:#F0FDF4;--text2:#6EE7B7;--text3:#374151;--muted:#94A3B8;--border:rgba(16,185,129,0.15);--border2:rgba(16,185,129,0.08);}
     html{scroll-behavior:smooth;}
@@ -247,8 +249,8 @@
     <div class="nl-terminal">$ iniciando_subscripcion --tipo=gratuita --frecuencia=diaria</div>
     <h2 class="nl-title">1 prompt nuevo<br><span style="color:var(--green)">cada día</span> en tu email</h2>
     <p class="nl-sub">El prompt más útil de la semana con ejemplos reales. Gratis.</p>
-    <form class="nl-form" onsubmit="return false;"><input type="email" placeholder="tu@email.com" required><button type="submit">./suscribir</button></form>
-    <p class="nl-note">// sin spam · baja cuando quieras · 100% gratis</p>
+    <form class="nl-form" id="nl-form-sp"><input type="email" id="nl-email-sp" placeholder="tu@email.com" required><button type="submit" id="nl-btn-sp">./suscribir</button></form>
+    <p class="nl-note" id="nl-msg-sp">// sin spam · baja cuando quieras · 100% gratis</p>
   </div></div></section>
   <footer><div class="footer-inner">
     <a href="#" class="footer-logo">[SuperPrompts]</a>
@@ -275,6 +277,18 @@
     document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
     const cObs=new IntersectionObserver(e=>{e.forEach(entry=>{if(!entry.isIntersecting)return;const el=entry.target,target=+el.dataset.count;let cur=0;const step=target/(1500/16);const t=setInterval(()=>{cur=Math.min(cur+step,target);el.textContent=target>=1000?Math.floor(cur).toLocaleString('es')+'+':Math.floor(cur)+'+';if(cur>=target)clearInterval(t);},16);cObs.unobserve(el);});},{threshold:.5});
     document.querySelectorAll('.stat-num').forEach(el=>cObs.observe(el));
+    document.getElementById('nl-form-sp').addEventListener('submit',async function(e){
+      e.preventDefault();
+      var btn=document.getElementById('nl-btn-sp'),msg=document.getElementById('nl-msg-sp'),email=document.getElementById('nl-email-sp').value.trim();
+      btn.textContent='ejecutando...';btn.disabled=true;
+      try{
+        var r=await fetch('<?php echo esc_url(rest_url("newsletter/v1/subscribe")); ?>',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,site:'superprompts'})});
+        var d=await r.json();
+        if(d.success){btn.textContent='✓ suscrito';btn.style.background='#22c55e';document.getElementById('nl-email-sp').value='';}
+        else{btn.textContent='// error - reintentar';btn.disabled=false;}
+        msg.textContent=d.message||msg.textContent;
+      }catch(err){btn.textContent='./reintentar';btn.disabled=false;}
+    });
   </script>
 </body>
 </html>

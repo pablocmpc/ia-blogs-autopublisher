@@ -18,6 +18,13 @@ Template Name: Página Principal
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
+    /* Ocultar header/topbar del tema de Hostinger/WordPress */
+    body > header, #masthead, .site-header, .ast-header-break-point,
+    .hestia-header, .header-section, .header-wrapper, #site-header,
+    .custom-header, .wp-block-site-logo, .wp-block-site-title,
+    .site-branding, #wpadminbar { display:none !important; }
+    html { margin-top:0 !important; }
+    body.admin-bar, body.logged-in { margin-top:0 !important; padding-top:0 !important; }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
       --bg:#070B14;--bg2:#0D1321;--bg3:#111827;
@@ -247,11 +254,11 @@ Template Name: Página Principal
     <div class="newsletter-icon">📬</div>
     <h2 class="newsletter-title">Un artículo de IA<br>cada día en tu email</h2>
     <p class="newsletter-sub">Gratis, sin spam. Baja cuando quieras.</p>
-    <form class="newsletter-form" onsubmit="return false;">
-      <input type="email" placeholder="tu@email.com" required>
-      <button type="submit">Suscribirme gratis →</button>
+    <form class="newsletter-form" id="nl-form-ia">
+      <input type="email" id="nl-email-ia" placeholder="tu@email.com" required>
+      <button type="submit" id="nl-btn-ia">Suscribirme gratis →</button>
     </form>
-    <p class="newsletter-note">Sin spam. Baja cuando quieras.</p>
+    <p class="newsletter-note" id="nl-msg-ia">Sin spam. Baja cuando quieras.</p>
   </div></div></section>
   <footer><div class="footer-inner">
     <a href="#" class="footer-logo">IA para <span>Principiantes</span></a>
@@ -272,6 +279,18 @@ Template Name: Página Principal
     document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
     const cObs=new IntersectionObserver(entries=>{entries.forEach(entry=>{if(!entry.isIntersecting)return;const el=entry.target,target=+el.dataset.count;let cur=0;const step=target/(1800/16);const t=setInterval(()=>{cur=Math.min(cur+step,target);el.textContent=target>=1000?Math.floor(cur).toLocaleString('es'):Math.floor(cur)+(target===100?'%':'+');if(cur>=target)clearInterval(t);},16);cObs.unobserve(el);});},{threshold:.5});
     document.querySelectorAll('.stat-number').forEach(el=>cObs.observe(el));
+    document.getElementById('nl-form-ia').addEventListener('submit',async function(e){
+      e.preventDefault();
+      var btn=document.getElementById('nl-btn-ia'),msg=document.getElementById('nl-msg-ia'),email=document.getElementById('nl-email-ia').value.trim();
+      btn.textContent='Enviando...';btn.disabled=true;
+      try{
+        var r=await fetch('<?php echo esc_url(rest_url("newsletter/v1/subscribe")); ?>',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,site:'iaparaprincipiantes'})});
+        var d=await r.json();
+        if(d.success){btn.textContent='✓ ¡Suscrito!';btn.style.background='#22c55e';document.getElementById('nl-email-ia').value='';}
+        else{btn.textContent='Error - Reintentar';btn.disabled=false;}
+        msg.textContent=d.message||msg.textContent;
+      }catch(err){btn.textContent='Reintentar';btn.disabled=false;}
+    });
   </script>
 </body>
 </html>
