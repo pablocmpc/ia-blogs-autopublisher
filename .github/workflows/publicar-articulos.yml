@@ -40,6 +40,15 @@ jobs:
         working-directory: auto-publisher
         run: python publisher.py 1
 
+      - name: Guardar keywords actualizadas en el repo
+        if: always()
+        run: |
+          git config user.name "Auto-Publisher Bot"
+          git config user.email "bot@autopublisher.ia"
+          git add auto-publisher/keywords.json || true
+          git diff --cached --quiet || git commit -m "bot: actualizar keywords usadas [skip ci]"
+          git push || true
+
       - name: Subir log de publicaciones
         if: always()
         uses: actions/upload-artifact@v4
