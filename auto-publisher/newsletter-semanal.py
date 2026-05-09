@@ -111,9 +111,9 @@ def build_html_email(site_name, site_url, posts, accent_color="#3b82f6", logo_em
 </html>"""
 
 SITE_CONFIG = {
-    "iaparaprincipiantes": {"name": "IA para Principiantes", "color": "#3b82f6", "emoji": "🤖"},
-    "superprompts":         {"name": "SuperPrompts.es",       "color": "#10b981", "emoji": "⚡"},
-    "guiaclaude":           {"name": "GuiaClaude.es",          "color": "#f97316", "emoji": "🧡"},
+    "ia_principiantes": {"name": "IA para Principiantes", "color": "#3b82f6", "emoji": "bot", "nl_key": "iaparaprincipiantes"},
+    "prompts":           {"name": "SuperPrompts.es",        "color": "#10b981", "emoji": "sp",  "nl_key": "superprompts"},
+    "claude":            {"name": "GuiaClaude.es",           "color": "#f97316", "emoji": "gc",  "nl_key": "guiaclaude"},
 }
 
 print("=== Newsletter Semanal ===\n")
@@ -121,24 +121,34 @@ print("=== Newsletter Semanal ===\n")
 total_sent = 0
 errors = []
 
-for site_key, site in cfg.get("sites", {}).items():
-    url  = site["url"].rstrip("/")
-    auth = (site["username"], site["app_password"])
-    scfg = SITE_CONFIG.get(site_key, {"name": site_key, "color": "#3b82f6", "emoji": "📬"})
+for site in cfg.get("sites", []):
+    site_key = site.get("keywords_key", "")
+    url  = site.get("url", "").rstrip("/")
+    auth = (site.get("wp_user", ""), site.get("wp_password", ""))
+    scfg = SITE_CONFIG.get(site_key, {"name": site.get("name", site_key), "color": "#3b82f6", "emoji": "nl", "nl_key": site_key})
 
     print(f"→ {site_key}: recogiendo artículos y suscriptores...")
 
+    nl_key = scfg.get("nl_key", site_key)
     posts = get_recent_posts(url, auth)
-    subscribers = get_subscribers(url, auth)
 
-    print(f"   {len(posts)} artículos nuevos · {len(subscribers)} suscriptores")
+    # Obtener suscriptores de este sitio especifico
+    r_subs = requests.get(f"{url}/wp-json/newsletter/v1/subscribers", auth=auth, timeout=15)
+    if r_subs.ok:
+        subs_data = r_subs.json()
+        subscribers = subs_data.get(nl_key, [])
+    else:
+        subscribers = []
+
+    print(f"   {len(posts)} articulos nuevos · {len(subscribers)} suscriptores")
 
     if not subscribers:
-        print(f"   Sin suscriptores todavía — saltando\n")
+        print(f"   Sin suscriptores todavia - saltando\n")
         continue
 
-    html_body = build_html_email(scfg["name"], url, posts, scfg["color"], scfg["emoji"])
-    subject   = f"📬 {scfg['name']} — Newsletter {datetime.now().strftime('%d/%m/%Y')}"
+    emoji_map = {"bot": "Inteligencia Artificial", "sp": "SuperPrompts", "gc": "GuiaClaude"}
+    html_body = build_html_email(scfg["name"], url, posts, scfg["color"], "IA")
+    subject   = f"Newsletter {scfg['name']} - {datetime.now().strftime('%d/%m/%Y')}"
 
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
@@ -153,12 +163,12 @@ for site_key, site in cfg.get("sites", {}).items():
                 msg.attach(MIMEText(html_body, "html", "utf-8"))
                 smtp.sendmail(SMTP_EMAIL, email_to, msg.as_string())
                 sent += 1
-            print(f"   ✅ Enviados {sent} emails\n")
+            print(f"   OK Enviados {sent} emails\n")
             total_sent += sent
     except Exception as e:
         err = f"Error en {site_key}: {e}"
         errors.append(err)
-        print(f"   ❌ {err}\n")
+        print(f"   ERROR: {err}\n")
 
 print(f"\n=== Resumen: {total_sent} emails enviados ===")
 if errors:

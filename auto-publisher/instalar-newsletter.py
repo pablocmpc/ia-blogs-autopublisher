@@ -1,14 +1,21 @@
+# -*- coding: utf-8 -*-
 """
 Instala el endpoint REST de newsletter en las 3 webs WordPress via Code Snippets.
-Ejecutar una sola vez. Los emails quedan guardados en la base de datos WordPress.
+Los emails quedan guardados en la base de datos WordPress de cada web.
 """
-import json, base64, sys
-import requests
+import sys, json, base64, requests, os
 
-with open("config.json") as f:
-    cfg = json.load(f)
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-SNIPPET_PHP = r"""
+SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(SCRIPT_DIR, 'config.json')
+
+with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+    config = json.load(f)
+
+SNIPPET_PHP = """<?php
 add_action('rest_api_init', function() {
   register_rest_route('newsletter/v1', '/subscribe', [
     'methods' => 'POST',
@@ -16,22 +23,22 @@ add_action('rest_api_init', function() {
       $email = sanitize_email($req->get_param('email'));
       $site  = sanitize_key($req->get_param('site') ?? 'general');
       if (!is_email($email)) {
-        return new WP_REST_Response(['success'=>false,'message'=>'Email no válido'], 400);
+        return new WP_REST_Response(['success'=>false,'message'=>'Email no valido'], 400);
       }
       $key  = 'nl_subs_' . $site;
       $subs = get_option($key, []);
       if (in_array($email, $subs)) {
-        return new WP_REST_Response(['success'=>true,'message'=>'¡Ya estás suscrito! 👍'], 200);
+        return new WP_REST_Response(['success'=>true,'message'=>'Ya estas suscrito!'], 200);
       }
       $subs[] = $email;
       update_option($key, $subs, false);
-      return new WP_REST_Response(['success'=>true,'message'=>'¡Suscrito! Recibirás el próximo newsletter 📬'], 200);
+      return new WP_REST_Response(['success'=>true,'message'=>'Suscrito! Recibiras el proximo newsletter'], 200);
     },
     'permission_callback' => '__return_true',
   ]);
 
   register_rest_route('newsletter/v1', '/subscribers', [
-    'methods' => 'GET',
+    'methods'  => 'GET',
     'callback' => function() {
       $sites = ['iaparaprincipiantes','superprompts','guiaclaude'];
       $all = [];
@@ -42,69 +49,127 @@ add_action('rest_api_init', function() {
     },
     'permission_callback' => function() { return current_user_can('manage_options'); },
   ]);
+
+  register_rest_route('newsletter/v1', '/count', [
+    'methods'  => 'GET',
+    'callback' => function() {
+      $sites = ['iaparaprincipiantes','superprompts','guiaclaude'];
+      $counts = []; $total = 0;
+      foreach ($sites as $s) {
+        $c = count(get_option('nl_subs_' . $s, []));
+        $counts[$s] = $c;
+        $total += $c;
+      }
+      $counts['total'] = $total;
+      return new WP_REST_Response($counts, 200);
+    },
+    'permission_callback' => '__return_true',
+  ]);
 });
 """
 
-def install_snippet(site_key):
-    site = cfg["sites"][site_key]
-    url   = site["url"].rstrip("/")
-    user  = site["username"]
-    pwd   = site["app_password"]
-    auth  = (user, pwd)
-    api   = f"{url}/wp-json/wp/v2"
+SNIPPET_NAME = 'Newsletter REST API Endpoint'
 
-    # Buscar snippet existente por título
-    title = "Newsletter REST API Endpoint"
-    r = requests.get(f"{api}/code-snippets", auth=auth, params={"search": title, "per_page": 5})
-    snippets = r.json() if r.ok else []
-    existing = next((s for s in snippets if isinstance(s, dict) and s.get("title", {}).get("rendered","") == title), None)
+def auth_header(user, pwd):
+    token = base64.b64encode(f"{user}:{pwd}".encode()).decode()
+    return {'Authorization': f'Basic {token}'}
+
+def ensure_code_snippets(url, user, pwd):
+    h = {**auth_header(user, pwd), 'Content-Type': 'application/json'}
+    r = requests.get(f"{url}/wp-json/code-snippets/v1/snippets", headers=h, timeout=15)
+    if r.status_code == 200:
+        print("    [OK] Code Snippets activo")
+        return True
+    r2 = requests.post(
+        f"{url}/wp-json/wp/v2/plugins",
+        headers=h,
+        json={'slug': 'code-snippets', 'status': 'active'},
+        timeout=60
+    )
+    if r2.status_code in (200, 201):
+        print("    [OK] Code Snippets instalado y activado")
+        return True
+    if 'already' in r2.text.lower() or r2.status_code == 400:
+        r3 = requests.put(
+            f"{url}/wp-json/wp/v2/plugins/code-snippets%2Fcode-snippets",
+            headers=h,
+            json={'status': 'active'},
+            timeout=30
+        )
+        if r3.status_code in (200, 201):
+            print("    [OK] Code Snippets activado")
+            return True
+    print(f"    [ERROR] Code Snippets: {r2.status_code}")
+    return False
+
+def install_newsletter_snippet(url, user, pwd):
+    h = {**auth_header(user, pwd), 'Content-Type': 'application/json'}
+
+    # Eliminar snippet anterior si existe
+    r_list = requests.get(f"{url}/wp-json/code-snippets/v1/snippets", headers=h, timeout=15)
+    if r_list.status_code == 200:
+        for s in r_list.json():
+            if s.get('name') == SNIPPET_NAME:
+                sid = s['id']
+                requests.delete(f"{url}/wp-json/code-snippets/v1/snippets/{sid}", headers=h, timeout=15)
+                print(f"    [INFO] Snippet anterior eliminado (ID {sid})")
+                break
 
     payload = {
-        "title": title,
-        "content": SNIPPET_PHP,
-        "status": "publish",
-        "meta": {"run_everywhere": True}
+        'name':   SNIPPET_NAME,
+        'code':   SNIPPET_PHP,
+        'active': True,
+        'scope':  'global',
     }
+    r = requests.post(f"{url}/wp-json/code-snippets/v1/snippets", headers=h, json=payload, timeout=30)
+    if r.status_code in (200, 201):
+        sid = r.json().get('id', '?')
+        print(f"    [OK] Snippet creado y activo (ID {sid})")
+        return True
+    print(f"    [ERROR] Snippet: {r.status_code} -- {r.text[:300]}")
+    return False
 
-    if existing:
-        r2 = requests.post(f"{api}/code-snippets/{existing['id']}", auth=auth, json=payload)
-        action = "actualizado"
+def verify_endpoint(url):
+    """Verifica que el endpoint funciona enviando un email de prueba"""
+    test_email = "test_install@verificacion.local"
+    r = requests.post(
+        f"{url}/wp-json/newsletter/v1/subscribe",
+        json={"email": test_email, "site": "test"},
+        timeout=15
+    )
+    if r.status_code == 200 and r.json().get("success"):
+        print(f"    [OK] Endpoint verificado: {r.json().get('message')}")
+        # Limpiar email de prueba via opcion
+        return True
     else:
-        r2 = requests.post(f"{api}/code-snippets", auth=auth, json=payload)
-        action = "creado"
+        print(f"    [WARN] Endpoint responde {r.status_code}: {r.text[:100]}")
+        return False
 
-    if r2.ok:
-        print(f"  ✅ {site_key}: snippet {action} (ID {r2.json().get('id','?')})")
-    else:
-        # Fallback: activar directamente via functions.php option
-        print(f"  ⚠️  {site_key}: Code Snippets no disponible, usando wp_options directamente")
-        activate_via_option(url, auth, SNIPPET_PHP)
-
-def activate_via_option(url, auth, code):
-    """Fallback: guarda el código en wp_options para auto-ejecución"""
-    snippet_b64 = base64.b64encode(code.encode()).decode()
-    activate_code = f"""
-<?php
-$b64 = '{snippet_b64}';
-$code = base64_decode($b64);
-update_option('nl_rest_snippet', $code);
-eval($code);
-?>"""
-    payload = {
-        "title": "Newsletter REST API - Init",
-        "content": activate_code,
-        "status": "publish"
-    }
-    r = requests.post(f"{url}/wp-json/wp/v2/code-snippets", auth=auth, json=payload)
-    if r.ok:
-        print(f"    → Snippet alternativo creado OK")
-    else:
-        print(f"    → Error: {r.status_code} — verifica que Code Snippets esté instalado")
 
 print("Instalando endpoint newsletter en las 3 webs...\n")
-for key in cfg.get("sites", {}):
-    print(f"→ {key}...")
-    install_snippet(key)
 
-print("\n✅ Listo. Los emails se guardan en la base de datos WordPress de cada web.")
-print("   Para verlos: wp-admin → Herramientas → Plugin Debug Bar, o ejecuta newsletter-semanal.py")
+sites = config.get("sites", [])
+for site in sites:
+    name = site.get("name", "?")
+    url  = site.get("url", "").rstrip("/")
+    user = site.get("wp_user", "")
+    pwd  = site.get("wp_password", "")
+
+    print(f">> {name} ({url})")
+
+    if not url or not user or not pwd:
+        print("    [SKIP] Credenciales incompletas")
+        continue
+
+    ok_cs = ensure_code_snippets(url, user, pwd)
+    if not ok_cs:
+        print("    [SKIP] Code Snippets no disponible\n")
+        continue
+
+    ok_sn = install_newsletter_snippet(url, user, pwd)
+    if ok_sn:
+        verify_endpoint(url)
+    print()
+
+print("Listo. Los emails se guardan en la base de datos WordPress.")
+print("Puedes verlos en: /wp-json/newsletter/v1/subscribers (requiere login admin)")

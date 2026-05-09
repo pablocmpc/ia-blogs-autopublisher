@@ -77,6 +77,12 @@ tr:last-child td{border-bottom:none}
     <div class="stat"><div class="sv" style="color:#8b5cf6">3</div><div class="sl">Webs activas</div></div>
   </div>
 
+  <!-- Suscriptores newsletter -->
+  <div class="card">
+    <div class="ct">📬 Suscriptores newsletter <span id="nl-total-badge" style="margin-left:auto;font-weight:400;color:#334155">cargando...</span></div>
+    <div id="nl-rows"><div style="color:#334155;font-size:.8rem">Consultando webs...</div></div>
+  </div>
+
   <!-- GitHub Actions runs -->
   <div class="card">
     <div class="ct">🔄 Ejecuciones recientes <span id="gh-st" style="font-weight:400;color:#334155;margin-left:auto">cargando...</span></div>
@@ -198,6 +204,37 @@ async function loadRuns(){
   }
 }
 loadRuns(); setInterval(loadRuns,30000);
+
+// Suscriptores newsletter
+const NL_SITES=[
+  {key:'iaparaprincipiantes',url:'https://iaparaprincipiantes.es',label:'iaparaprincipiantes.es',color:'#3b82f6'},
+  {key:'superprompts',url:'https://superprompts.es',label:'superprompts.es',color:'#22c55e'},
+  {key:'guiaclaude',url:'https://guiaclaude.es',label:'guiaclaude.es',color:'#f97316'},
+];
+async function loadSubscribers(){
+  let html='',totalAll=0;
+  for(const s of NL_SITES){
+    try{
+      const r=await fetch(`${s.url}/wp-json/newsletter/v1/count`);
+      const d=await r.json();
+      const n=d[s.key]??d.total??0;
+      totalAll+=n;
+      html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-bottom:1px solid #0f172a">
+        <a href="${s.url}" target="_blank" style="color:${s.color};font-size:.78rem;text-decoration:none">↗ ${s.label}</a>
+        <span style="font-size:.82rem;font-weight:700;color:#e2e8f0">${n} <span style="color:#475569;font-weight:400">suscriptores</span></span>
+      </div>`;
+    }catch(e){
+      html+=`<div style="font-size:.75rem;color:#475569;padding:.3rem 0">↗ ${s.label}: error</div>`;
+    }
+  }
+  html+=`<div style="display:flex;justify-content:space-between;padding:.5rem 0;margin-top:.2rem">
+    <span style="font-size:.78rem;color:#475569">Total combinado</span>
+    <span style="font-size:.9rem;font-weight:800;color:#8b5cf6">${totalAll}</span>
+  </div>`;
+  document.getElementById('nl-rows').innerHTML=html;
+  document.getElementById('nl-total-badge').textContent=totalAll+' total';
+}
+loadSubscribers(); setInterval(loadSubscribers,60000);
 
 // Auto-refresh completo cada 5 min
 setTimeout(()=>location.reload(),300000);
