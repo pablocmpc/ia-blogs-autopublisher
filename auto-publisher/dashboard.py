@@ -5,8 +5,13 @@ Abre una web local que muestra el estado de la automatizacion.
 Sin dependencias extra — usa solo la libreria estandar de Python.
 """
 import http.server, socketserver, threading, webbrowser
-import json, csv, os, sys
+import json, csv, os, sys, base64
 from datetime import datetime, timezone, timedelta
+try:
+    import requests as _requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -22,13 +27,40 @@ PORT          = 8787
 # ── Leer datos locales ──────────────────────────────────────────────────────
 
 def get_publications():
+    """Lee artículos reales desde WordPress API (datos en vivo, no CSV local)."""
+    if not HAS_REQUESTS or not os.path.exists(CONFIG_FILE):
+        return []
+    try:
+        with open(CONFIG_FILE, encoding='utf-8') as f:
+            cfg = json.load(f)
+    except Exception:
+        return []
     pubs = []
-    if not os.path.exists(CSV_FILE):
-        return pubs
-    with open(CSV_FILE, newline='', encoding='utf-8') as f:
-        for row in csv.DictReader(f):
-            pubs.append(row)
-    return list(reversed(pubs))
+    hoy = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    for site in cfg.get('sites', []):
+        url  = site.get('url','').rstrip('/')
+        user = site.get('wp_user','')
+        pwd  = site.get('wp_password','')
+        if not url: continue
+        tok = base64.b64encode(f'{user}:{pwd}'.encode()).decode()
+        h   = {'Authorization': f'Basic {tok}'}
+        try:
+            r = _requests.get(f'{url}/wp-json/wp/v2/posts', headers=h, timeout=8,
+                params={'per_page':20,'orderby':'date','order':'desc',
+                        '_fields':'id,title,link,date,categories'})
+            if r.ok:
+                for p in r.json():
+                    pubs.append({
+                        'Fecha':       p.get('date','')[:16].replace('T',' '),
+                        'Web':         site.get('name','?')[:16],
+                        'Titulo':      p.get('title',{}).get('rendered','?'),
+                        'URL Articulo':p.get('link',''),
+                        'URL Pinterest':'',
+                    })
+        except Exception:
+            pass
+    pubs.sort(key=lambda x: x['Fecha'], reverse=True)
+    return pubs
 
 def get_keywords_stats():
     if not os.path.exists(KEYWORDS_FILE):
@@ -83,9 +115,24 @@ def build_html():
     sites  = get_sites()
     nexts  = next_schedules()
 
-    total_arts  = len(pubs)
-    hoy_str     = datetime.now().strftime('%Y-%m-%d')
+    hoy_str     = (datetime.now(timezone.utc) + timedelta(hours=2)).strftime('%Y-%m-%d')
     hoy_arts    = sum(1 for p in pubs if p.get('Fecha','').startswith(hoy_str))
+    # Total real desde WP (X-WP-Total header)
+    total_arts  = 0
+    if HAS_REQUESTS and os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, encoding='utf-8') as f:
+                _cfg = json.load(f)
+            for _s in _cfg.get('sites',[]):
+                _tok = base64.b64encode(f'{_s.get("wp_user","")}:{_s.get("wp_password","")}'.encode()).decode()
+                _r = _requests.get(f'{_s.get("url","").rstrip("/")}/wp-json/wp/v2/posts',
+                    headers={'Authorization':f'Basic {_tok}'}, timeout=6,
+                    params={'per_page':1,'_fields':'id'})
+                total_arts += int(_r.headers.get('X-WP-Total', 0)) if _r.ok else 0
+        except Exception:
+            total_arts = len(pubs)
+    else:
+        total_arts = len(pubs)
     sites_count = len(sites)
 
     # Publicaciones rows
