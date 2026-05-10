@@ -1,0 +1,33 @@
+name: Retrolink Semanal (Domingo 4:00 España)
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'   # Domingo 4:00 España (UTC+2 = 2:00 UTC)
+  workflow_dispatch:
+
+jobs:
+  retrolink:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install requests
+
+      - name: Crear config.json desde secrets
+        working-directory: auto-publisher
+        env:
+          CONFIG_JSON: ${{ secrets.CONFIG_JSON }}
+        run: echo "$CONFIG_JSON" > config.json
+
+      - name: Actualizar enlaces internos en artículos existentes
+        working-directory: auto-publisher
+        run: python retrolink.py
