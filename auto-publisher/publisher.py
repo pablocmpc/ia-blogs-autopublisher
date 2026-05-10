@@ -1,27 +1,38 @@
 """
-AUTO-PUBLISHER IA — Sistema de publicación automática con Pinterest
-Genera artículos SEO con Groq (gratis), los publica en WordPress
-y crea el pin en Pinterest automáticamente.
+AUTO-PUBLISHER IA — Motor SEO completo
+Genera artículos con Groq, los publica en WordPress con:
+  · Enlazado interno automático (topical authority)
+  · Schema markup JSON-LD (Article + FAQPage)
+  · Ping a Google y Bing tras cada publicación
+  · Selección inteligente de keywords (topic clustering)
+  · E-E-A-T signals en el prompt
 """
 
 import requests
 import json
 import csv
 import os
+import re
 import sys
 import time
 import random
 from datetime import datetime
 
-# Forzar UTF-8 en la consola de Windows para que los emojis no den error
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE  = os.path.join(BASE_DIR, 'config.json')
+BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE   = os.path.join(BASE_DIR, 'config.json')
 KEYWORDS_FILE = os.path.join(BASE_DIR, 'keywords.json')
-LOG_FILE     = os.path.join(BASE_DIR, 'publicaciones.csv')
+LOG_FILE      = os.path.join(BASE_DIR, 'publicaciones.csv')
+
+STOP_ES = {
+    'de','la','el','en','y','a','los','las','con','para','por','que','es',
+    'se','un','una','del','al','como','lo','su','le','si','no','más','pero',
+    'este','esta','esto','son','tiene','hacer','puede','sobre','entre','hasta',
+    'desde','sin','qué','cómo','cuál','cuáles','también'
+}
 
 
 # ─────────────────────────────────────────────
@@ -37,58 +48,243 @@ def save_json(path, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 def pinterest_configured(config):
-    """Devuelve True si Pinterest tiene credenciales reales."""
     p = config.get('pinterest', {})
     token = p.get('access_token', '')
     return token and 'PENDIENTE' not in token and len(token) > 20
+
+def _words(text):
+    return set(text.lower().replace('-', ' ').split()) - STOP_ES
+
+
+# ─────────────────────────────────────────────
+# SEO ENGINE — ARTÍCULOS RECIENTES
+# ─────────────────────────────────────────────
+
+def get_recent_articles(wp_url, wp_user, wp_pass, limit=25):
+    """Obtiene los últimos artículos publicados para enlazado interno."""
+    clean = wp_url.rstrip('/')
+    try:
+        r = requests.get(
+            f'{clean}/wp-json/wp/v2/posts',
+            auth=(wp_user, wp_pass),
+            params={
+                'per_page': limit,
+                'status': 'publish',
+                'orderby': 'date',
+                'order': 'desc',
+                '_fields': 'id,title,link'
+            },
+            timeout=15
+        )
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return []
+
+
+def find_related_articles(keyword, recent_articles, max_results=3):
+    """Encuentra artículos temáticamente relacionados con la keyword."""
+    kw_words = _words(keyword)
+    scored = []
+    for art in recent_articles:
+        title = art.get('title', {}).get('rendered', '')
+        title_words = _words(title)
+        overlap = len(kw_words & title_words)
+        if overlap > 0:
+            scored.append((overlap, art))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [art for _, art in scored[:max_results]]
+
+
+def select_smart_keyword(keywords_data, kw_key, recent_articles):
+    """
+    Selecciona keyword priorizando temas no cubiertos recientemente.
+    Esto construye autoridad tópica en lugar de repetir el mismo tema.
+    """
+    available = keywords_data.get(kw_key, [])
+    if not available:
+        return None
+    if not recent_articles:
+        return random.choice(available)
+
+    recent_words = set()
+    for art in recent_articles[:12]:
+        title = art.get('title', {}).get('rendered', '')
+        recent_words |= _words(title)
+
+    best_kw, best_score = None, -1
+    for kw in available:
+        kw_words = _words(kw)
+        novelty = len(kw_words - recent_words)
+        if novelty > best_score:
+            best_score = novelty
+            best_kw = kw
+
+    return best_kw or random.choice(available)
+
+
+# ─────────────────────────────────────────────
+# SEO ENGINE — SCHEMA MARKUP JSON-LD
+# ─────────────────────────────────────────────
+
+def build_schema_markup(article, post_url, site_name, site_url, image_url=None):
+    """Genera JSON-LD para Article + FAQPage (rich results en Google)."""
+    now_iso = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    article_schema = {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": article['titulo_seo'],
+        "description": article['meta_descripcion'],
+        "url": post_url,
+        "datePublished": now_iso,
+        "dateModified": now_iso,
+        "inLanguage": "es-ES",
+        "author": {
+            "@type": "Organization",
+            "name": site_name,
+            "url": site_url
+        },
+        "publisher": {
+            "@type": "Organization",
+            "name": site_name,
+            "url": site_url
+        },
+        "mainEntityOfPage": {
+            "@type": "WebPage",
+            "@id": post_url
+        }
+    }
+    if image_url:
+        article_schema["image"] = {
+            "@type": "ImageObject",
+            "url": image_url,
+            "width": 1280,
+            "height": 720
+        }
+
+    # Extraer FAQs del HTML para FAQPage schema (rich snippets en SERP)
+    content = article.get('contenido_html', '')
+    faq_matches = re.findall(
+        r'<h3[^>]*>([^<]{10,200}\?)[^<]*</h3>\s*<p[^>]*>(.*?)</p>',
+        content, re.IGNORECASE | re.DOTALL
+    )
+
+    schemas = [article_schema]
+
+    if faq_matches:
+        faq_items = []
+        for question, answer in faq_matches[:5]:
+            q = re.sub(r'<[^>]+>', '', question).strip()
+            a = re.sub(r'<[^>]+>', '', answer).strip()[:500]
+            if q and a and len(q) > 10:
+                faq_items.append({
+                    "@type": "Question",
+                    "name": q,
+                    "acceptedAnswer": {"@type": "Answer", "text": a}
+                })
+        if faq_items:
+            schemas.append({
+                "@context": "https://schema.org",
+                "@type": "FAQPage",
+                "mainEntity": faq_items
+            })
+
+    schema_html = ''
+    for s in schemas:
+        schema_html += f'<script type="application/ld+json">\n{json.dumps(s, ensure_ascii=False, indent=2)}\n</script>\n'
+
+    return schema_html
+
+
+# ─────────────────────────────────────────────
+# SEO ENGINE — PING A BUSCADORES
+# ─────────────────────────────────────────────
+
+def ping_search_engines(site_url):
+    """Notifica a Google y Bing que hay contenido nuevo en el sitemap."""
+    sitemap = f"{site_url.rstrip('/')}/sitemap.xml"
+    for engine, url in [
+        ('Google', f'https://www.google.com/ping?sitemap={sitemap}'),
+        ('Bing',   f'https://www.bing.com/ping?sitemap={sitemap}'),
+    ]:
+        try:
+            r = requests.get(url, timeout=8)
+            status = 'OK' if r.status_code == 200 else r.status_code
+            print(f"          {engine}: {status}", end='  ')
+        except Exception:
+            print(f"          {engine}: timeout", end='  ')
+    print()
 
 
 # ─────────────────────────────────────────────
 # GENERACIÓN DE ARTÍCULO CON GROQ
 # ─────────────────────────────────────────────
 
-def generate_article(keyword, niche_context, site_name, groq_api_key):
-    """Genera un artículo SEO completo en español usando Groq (gratis)."""
+def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None):
+    """Genera artículo SEO con E-E-A-T signals y enlazado interno."""
 
-    prompt = f"""Eres el mejor redactor SEO de España especializado en inteligencia artificial. Escribe un artículo largo, profundo y bien estructurado que posicione en Google.
+    internal_links_block = ""
+    if related_articles:
+        links_list = "\n".join(
+            f'  - Título: "{a.get("title",{}).get("rendered","")}" → URL: {a.get("link","")}'
+            for a in related_articles
+        )
+        internal_links_block = f"""
+ENLACES INTERNOS OBLIGATORIOS:
+Incluye exactamente {len(related_articles)} enlaces internos en el cuerpo del artículo (no en FAQs ni en conclusión).
+Usa anchor text natural y descriptivo que incluya keywords relacionadas.
+Artículos a enlazar:
+{links_list}
+Formato correcto: <a href="URL_DEL_ARTICULO">anchor text descriptivo</a>
+"""
+
+    prompt = f"""Eres el mejor redactor SEO de España especializado en inteligencia artificial. Tu misión: escribir el artículo más útil, profundo y bien estructurado sobre este tema para posicionar en el Top 3 de Google en 2025.
 
 KEYWORD PRINCIPAL: "{keyword}"
 BLOG: {site_name}
 CONTEXTO DEL NICHO: {niche_context}
+{internal_links_block}
+SEÑALES E-E-A-T (imprescindibles para Google):
+- Demuestra experiencia práctica: ejemplos reales, casos de uso concretos, errores que cometen los principiantes
+- Cita estadísticas con fuente y año (ej: «Según un informe de McKinsey 2024...»)
+- Perspectiva experta: qué haría un profesional diferente, qué atajos NO funcionan
+- Incluye al menos 1 dato sorprendente o contraintuitivo que demuestre profundidad real
 
-REQUISITOS OBLIGATORIOS:
-- Idioma: Español de España natural (usa «tú», evita latinismos)
-- Longitud: entre 1.500 y 2.200 palabras (artículo largo para SEO)
-- La keyword aparece en: título H1, primer párrafo, al menos 3 H2, texto del cuerpo de forma natural
-- Densidad de keyword: 1-1.5% (natural, no forzada)
-- Tono: experto pero accesible — como si lo explicara un amigo que sabe mucho de IA
-- Párrafos cortos: máximo 3-4 líneas cada uno
-- Incluye datos reales, estadísticas (con año), ejemplos concretos y casos de uso
-- Usa listas <ul>/<ol> en al menos 2 secciones
-- Añade negritas <strong> en conceptos clave (3-5 por artículo)
-- Añade al menos una tabla HTML comparativa si tiene sentido para el tema
+REQUISITOS TÉCNICOS:
+- Idioma: Español de España natural (usa «tú», nada de latinismos)
+- Longitud: entre 1.800 y 2.500 palabras — artículo largo y completo
+- Keyword en: H1, primer párrafo, al menos 3 H2, cuerpo de forma natural
+- Densidad de keyword: 1-1.5% (orgánica, no spam)
+- Párrafos cortos: máximo 3-4 líneas
+- Listas <ul>/<ol> en al menos 2 secciones
+- <strong> en conceptos clave (5-8 por artículo)
+- Al menos 1 tabla HTML comparativa si el tema lo permite
+- 1-2 <blockquote> con citas o estadísticas impactantes
+- Titulo SEO con número o power word (ej: «7 formas de...», «La guía definitiva para...», «Por qué el 90% de...»)
 
 ESTRUCTURA OBLIGATORIA:
-1. H1 con la keyword exacta
-2. Párrafo introductorio de gancho (2-3 líneas) con keyword
-3. Párrafo «En este artículo aprenderás:» con lista de puntos
-4. 5-7 secciones H2 con contenido denso y útil
-5. Subsecciones H3 dentro de los H2 donde aporte valor
-6. Sección «Consejos prácticos» o «Paso a paso» con lista numerada
-7. Sección «Errores comunes» o «Qué evitar» (posiciona en búsquedas de comparación)
-8. FAQ con exactamente 5 preguntas frecuentes reales (no genéricas) con respuestas de 3-4 líneas cada una
-9. Párrafo de conclusión con CTA suave («Si quieres profundizar más, explora nuestros artículos sobre X»)
+1. H1 con keyword exacta y gancho potente (promete resultado concreto)
+2. Intro de 2-3 líneas con dato impactante o pregunta que genere curiosidad + keyword
+3. «En este artículo aprenderás:» con 4-5 puntos concretos en lista
+4. 5-7 secciones H2 con contenido denso y práctico
+5. Subsecciones H3 donde aporten valor real
+6. Sección «Paso a paso» o «Guía práctica» con lista numerada detallada
+7. Sección «Errores comunes que debes evitar» (captura búsquedas de comparación)
+8. Sección «FAQ — Preguntas frecuentes» con exactamente 5 preguntas en H3 (búsquedas reales de Google, específicas) con respuestas de 3-4 líneas cada una
+9. Conclusión con síntesis del valor principal y CTA suave hacia otro artículo
 
-Responde SOLO con este JSON válido, sin texto adicional:
+Responde SOLO con JSON válido, sin texto adicional:
 {{
-  "titulo_seo": "Título SEO de 55-60 caracteres con keyword al inicio",
-  "meta_descripcion": "Meta descripción de 150-155 caracteres con keyword, beneficio claro y CTA",
-  "slug": "url-con-guiones-keyword-incluida-sin-acentos",
-  "h1": "Título H1 del artículo (puede ser ligeramente más largo que el SEO title)",
-  "contenido_html": "Artículo completo en HTML con toda la estructura indicada. Mínimo 1500 palabras.",
-  "descripcion_pinterest": "Descripción Pinterest 120-150 caracteres con emoji inicial y CTA",
+  "titulo_seo": "Título SEO 55-60 chars con keyword al inicio + número o power word",
+  "meta_descripcion": "Meta 150-155 chars con keyword, beneficio concreto y CTA",
+  "slug": "url-con-guiones-keyword-sin-acentos",
+  "h1": "H1 del artículo (puede ser más largo que el SEO title)",
+  "contenido_html": "Artículo completo en HTML. Mínimo 1800 palabras. INCLUYE los enlaces internos indicados si se proporcionaron.",
+  "descripcion_pinterest": "120-150 chars con emoji inicial y CTA",
   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
-  "categoria": "Categoría corta (1-3 palabras)"
+  "categoria": "Categoría 1-3 palabras"
 }}"""
 
     headers = {
@@ -99,7 +295,7 @@ Responde SOLO con este JSON válido, sin texto adicional:
         'model': 'llama-3.3-70b-versatile',
         'messages': [{'role': 'user', 'content': prompt}],
         'temperature': 0.72,
-        'max_tokens': 4000,
+        'max_tokens': 6000,
         'response_format': {'type': 'json_object'}
     }
 
@@ -125,8 +321,6 @@ Responde SOLO con este JSON válido, sin texto adicional:
 # ─────────────────────────────────────────────
 
 def get_pexels_image(keyword, pexels_api_key):
-    """Busca una imagen relevante y gratuita en Pexels."""
-
     fallbacks = [keyword, 'inteligencia artificial', 'tecnologia', 'computadora', 'digital']
     headers = {'Authorization': pexels_api_key}
 
@@ -155,9 +349,6 @@ def get_pexels_image(keyword, pexels_api_key):
 
 
 def upload_image_to_wp(image_url, alt_text, wp_url, wp_user, wp_pass):
-    """Descarga imagen, la sube a WordPress y devuelve (media_id, hosted_url).
-    El tema Hostinger tiene un bug con featured_media, así que embebemos
-    la imagen en el contenido HTML en lugar de usarla como destacada."""
     try:
         img = requests.get(image_url, timeout=30)
         if img.status_code != 200:
@@ -186,7 +377,7 @@ def upload_image_to_wp(image_url, alt_text, wp_url, wp_user, wp_pass):
             )
             return media_id, hosted_url
     except Exception as e:
-        print(f'     ⚠️  Error subiendo imagen: {e}')
+        print(f'     Advertencia subiendo imagen: {e}')
     return None, image_url
 
 
@@ -236,13 +427,13 @@ def get_or_create_tags(tag_names, wp_url, wp_user, wp_pass):
 def publish_to_wordpress(article, image_url, image_alt, cat_id, tag_ids, wp_url, wp_user, wp_pass):
     clean = wp_url.rstrip('/')
 
-    # Prepend image to content (avoids Hostinger theme bug with featured_media)
     content = article['contenido_html']
     if image_url:
         alt = (image_alt or article['titulo_seo']).replace('"', '&quot;')
         img_html = (
             f'<figure class="wp-block-image size-large">'
-            f'<img src="{image_url}" alt="{alt}" style="width:100%;height:auto;border-radius:8px;margin-bottom:1.5em"/>'
+            f'<img src="{image_url}" alt="{alt}" '
+            f'style="width:100%;height:auto;border-radius:8px;margin-bottom:1.5em"/>'
             f'</figure>\n'
         )
         content = img_html + content
@@ -271,7 +462,6 @@ def publish_to_wordpress(article, image_url, image_alt, cat_id, tag_ids, wp_url,
 # ─────────────────────────────────────────────
 
 def get_pinterest_boards(access_token):
-    """Lista todos los tableros del usuario para obtener los IDs."""
     resp = requests.get(
         'https://api.pinterest.com/v5/boards',
         headers={'Authorization': f'Bearer {access_token}'},
@@ -284,19 +474,9 @@ def get_pinterest_boards(access_token):
 
 
 def create_pinterest_pin(title, description, article_url, image_url, board_id, access_token):
-    """
-    Crea un pin en Pinterest enlazando al artículo del blog.
-    La imagen viene de Pexels (vertical se adapta sola).
-    """
-    # Pinterest necesita imagen vertical idealmente.
-    # Usamos la URL de Pexels directamente — Pinterest la descarga y cachea.
-
-    pin_title = title[:100]
-    pin_desc  = description[:500] if description else title[:500]
-
     payload = {
-        'title':        pin_title,
-        'description':  pin_desc,
+        'title':        title[:100],
+        'description':  (description or title)[:500],
         'link':         article_url,
         'board_id':     board_id,
         'media_source': {
@@ -304,7 +484,6 @@ def create_pinterest_pin(title, description, article_url, image_url, board_id, a
             'url':         image_url
         }
     }
-
     resp = requests.post(
         'https://api.pinterest.com/v5/pins',
         headers={
@@ -314,16 +493,9 @@ def create_pinterest_pin(title, description, article_url, image_url, board_id, a
         json=payload,
         timeout=30
     )
-
-    if resp.status_code == 201:
+    if resp.status_code in (200, 201):
         data = resp.json()
         return f"https://pinterest.com/pin/{data.get('id', '')}"
-
-    # Pinterest a veces devuelve 200 también
-    if resp.status_code == 200:
-        data = resp.json()
-        return f"https://pinterest.com/pin/{data.get('id', '')}"
-
     raise Exception(f"Pinterest pin error {resp.status_code}: {resp.text[:300]}")
 
 
@@ -352,7 +524,7 @@ def mark_keyword_used(keywords_data, key, keyword):
         keywords_data[used_key].append(keyword)
 
         if not keywords_data[key]:
-            print(f'     ♻️  Keywords agotadas en {key}, reciclando...')
+            print(f'     Keywords agotadas en {key}, reciclando...')
             keywords_data[key] = keywords_data[used_key]
             keywords_data[used_key] = []
 
@@ -367,33 +539,42 @@ def run(articles_per_site=3):
     config        = load_json(CONFIG_FILE)
     keywords_data = load_json(KEYWORDS_FILE)
 
-    groq_key    = config['groq_api_key']
-    pexels_key  = config['pexels_api_key']
-    sites       = config['sites']
+    groq_key      = config['groq_api_key']
+    pexels_key    = config['pexels_api_key']
+    sites         = config['sites']
     use_pinterest = pinterest_configured(config)
     pinterest_cfg = config.get('pinterest', {})
 
     total_ok  = 0
     total_err = 0
 
-    print(f"\n{'═'*54}")
+    print(f"\n{'='*54}")
     print(f"  AUTO-PUBLISHER IA  ·  {datetime.now().strftime('%d/%m/%Y %H:%M')}")
-    print(f"{'═'*54}")
-    print(f"  Webs: {len(sites)}  ·  Artículos por web: {articles_per_site}")
-    print(f"  Pinterest: {'✅ Activo' if use_pinterest else '⏳ Pendiente configurar'}")
-    print(f"{'═'*54}\n")
+    print(f"{'='*54}")
+    print(f"  Webs: {len(sites)}  ·  Articulos por web: {articles_per_site}")
+    print(f"  SEO Engine: enlaces internos + schema JSON-LD + pings")
+    print(f"  Pinterest: {'Activo' if use_pinterest else 'Pendiente configurar'}")
+    print(f"{'='*54}\n")
 
     for site in sites:
         name    = site['name']
         kw_key  = site['keywords_key']
         pin_key = site.get('pinterest_board_key', kw_key)
+        wp_url  = site['url']
+        wp_user = site['wp_user']
+        wp_pass = site['wp_password']
 
         if not keywords_data.get(kw_key):
-            print(f"⚠️  {name}: Sin keywords. Saltando.\n")
+            print(f"  {name}: Sin keywords disponibles. Saltando.\n")
             continue
 
-        print(f"📝  {name}")
-        print(f"    {site['url']}")
+        print(f"  {name}")
+        print(f"    {wp_url}")
+
+        # Carga artículos recientes para enlazado interno y clustering
+        print(f"    → Cargando articulos publicados para SEO interno...", end=' ', flush=True)
+        recent_articles = get_recent_articles(wp_url, wp_user, wp_pass, limit=25)
+        print(f"{len(recent_articles)} articulos")
 
         published = 0
 
@@ -401,84 +582,98 @@ def run(articles_per_site=3):
             if not keywords_data.get(kw_key):
                 break
 
-            keyword = random.choice(keywords_data[kw_key])
+            # Selección inteligente de keyword (topic clustering)
+            keyword = select_smart_keyword(keywords_data, kw_key, recent_articles)
 
             try:
                 print(f"\n    [{i+1}/{articles_per_site}] Keyword: «{keyword}»")
 
+                # Artículos relacionados para enlazado interno
+                related = find_related_articles(keyword, recent_articles, max_results=3)
+                if related:
+                    print(f"        Links internos disponibles: {len(related)}")
+
                 # 1. GENERAR ARTÍCULO
-                print(f"        → Generando artículo con Groq...", end=' ', flush=True)
-                article = generate_article(keyword, site['niche_context'], name, groq_key)
-                print(f"✓")
-                print(f"        Título: {article['titulo_seo'][:55]}...")
+                print(f"        → Generando articulo con Groq...", end=' ', flush=True)
+                article = generate_article(
+                    keyword, site['niche_context'], name, groq_key,
+                    related_articles=related
+                )
+                print(f"OK")
+                print(f"        Titulo: {article['titulo_seo'][:60]}...")
 
                 # 2. IMAGEN
-                image_id       = None
                 image_url      = None
                 image_alt      = None
                 hosted_img_url = None
-                print(f"        → Buscando imagen en Pexels...", end=' ', flush=True)
+                print(f"        → Buscando imagen Pexels...", end=' ', flush=True)
                 img = get_pexels_image(keyword, pexels_key)
 
                 if img:
                     image_url = img['url_large']
                     image_alt = img['alt']
-                    print(f"✓  Subiendo a WordPress...", end=' ', flush=True)
-                    image_id, hosted_img_url = upload_image_to_wp(
-                        image_url, image_alt,
-                        site['url'], site['wp_user'], site['wp_password']
+                    print(f"OK  Subiendo a WordPress...", end=' ', flush=True)
+                    _, hosted_img_url = upload_image_to_wp(
+                        image_url, image_alt, wp_url, wp_user, wp_pass
                     )
-                    print('✓' if image_id else '(usando URL Pexels)')
+                    print('OK' if hosted_img_url and hosted_img_url != image_url else '(URL Pexels)')
                 else:
-                    print('(no encontrada, continuando sin imagen)')
+                    print('(no encontrada)')
 
                 # 3. CATEGORÍA Y ETIQUETAS
-                cat_id  = get_or_create_category(
-                    article.get('categoria', 'IA'),
-                    site['url'], site['wp_user'], site['wp_password']
-                )
-                tag_ids = get_or_create_tags(
-                    article.get('tags', []),
-                    site['url'], site['wp_user'], site['wp_password']
-                )
+                cat_id  = get_or_create_category(article.get('categoria', 'IA'), wp_url, wp_user, wp_pass)
+                tag_ids = get_or_create_tags(article.get('tags', []), wp_url, wp_user, wp_pass)
 
-                # 4. PUBLICAR EN WORDPRESS
+                # 4. SCHEMA MARKUP — añade JSON-LD al inicio del contenido
+                temp_url = f"{wp_url.rstrip('/')}/{article['slug']}/"
+                schema_html = build_schema_markup(
+                    article, temp_url, name, wp_url,
+                    hosted_img_url or image_url
+                )
+                article['contenido_html'] = schema_html + article['contenido_html']
+
+                # 5. PUBLICAR EN WORDPRESS
                 print(f"        → Publicando en WordPress...", end=' ', flush=True)
                 result   = publish_to_wordpress(
                     article, hosted_img_url, image_alt, cat_id, tag_ids,
-                    site['url'], site['wp_user'], site['wp_password']
+                    wp_url, wp_user, wp_pass
                 )
                 post_url = result.get('link', '')
-                print(f"✓")
-                print(f"        ✅ {post_url}")
+                print(f"OK")
+                print(f"        URL: {post_url}")
 
-                # 5. PINTEREST
+                # 6. PING A BUSCADORES
+                print(f"        → Ping sitemap:", end=' ', flush=True)
+                ping_search_engines(wp_url)
+
+                # 7. PINTEREST
                 pin_url = ''
                 if use_pinterest and image_url:
                     board_id = pinterest_cfg.get('boards', {}).get(pin_key, '')
                     if board_id and 'PENDIENTE' not in board_id:
                         try:
                             print(f"        → Creando pin en Pinterest...", end=' ', flush=True)
-                            pin_desc = article.get(
-                                'descripcion_pinterest',
-                                article['meta_descripcion']
-                            )
                             pin_url = create_pinterest_pin(
-                                title       = article['titulo_seo'],
-                                description = pin_desc,
-                                article_url = post_url,
-                                image_url   = image_url,
-                                board_id    = board_id,
-                                access_token= pinterest_cfg['access_token']
+                                title        = article['titulo_seo'],
+                                description  = article.get('descripcion_pinterest', article['meta_descripcion']),
+                                article_url  = post_url,
+                                image_url    = image_url,
+                                board_id     = board_id,
+                                access_token = pinterest_cfg['access_token']
                             )
-                            print(f"✓")
-                            print(f"        📌 {pin_url}")
+                            print(f"OK  {pin_url}")
                         except Exception as pe:
-                            print(f"⚠️  {str(pe)[:80]}")
+                            print(f"Error: {str(pe)[:80]}")
 
-                # 6. REGISTRAR
+                # 8. REGISTRAR
                 log_publication(name, article['titulo_seo'], post_url, keyword, pin_url)
                 mark_keyword_used(keywords_data, kw_key, keyword)
+
+                # Añadir al contexto local para que los siguientes artículos puedan enlazar a este
+                recent_articles.insert(0, {
+                    'title': {'rendered': article['titulo_seo']},
+                    'link': post_url
+                })
 
                 total_ok += 1
                 published += 1
@@ -487,21 +682,21 @@ def run(articles_per_site=3):
                     time.sleep(4)
 
             except Exception as e:
-                print(f"\n        ❌ Error: {str(e)[:130]}")
+                print(f"\n        ERROR: {str(e)[:130]}")
                 total_err += 1
                 time.sleep(3)
 
-        print(f"\n    📊 {name}: {published} artículo(s) publicado(s)\n")
+        print(f"\n    {name}: {published} articulo(s) publicado(s)\n")
 
         if site != sites[-1]:
             time.sleep(6)
 
-    print(f"{'═'*54}")
+    print(f"{'='*54}")
     print(f"  RESUMEN FINAL")
-    print(f"  ✅ Publicados:  {total_ok}")
-    print(f"  ❌ Errores:     {total_err}")
-    print(f"  📋 Registro:    publicaciones.csv")
-    print(f"{'═'*54}\n")
+    print(f"  OK  Publicados: {total_ok}")
+    print(f"  ERR Errores:    {total_err}")
+    print(f"  Log Registro:   publicaciones.csv")
+    print(f"{'='*54}\n")
 
 
 # ─────────────────────────────────────────────
@@ -509,43 +704,39 @@ def run(articles_per_site=3):
 # ─────────────────────────────────────────────
 
 def check_config():
-    print("\n🔍 Verificando configuración...\n")
+    print("\nVerificando configuracion...\n")
     config = load_json(CONFIG_FILE)
     ok = True
 
-    # Groq
     if 'PENDIENTE' in config['groq_api_key'] or not config['groq_api_key']:
-        print("❌ Falta la clave de Groq")
+        print("ERROR Falta la clave de Groq")
         ok = False
     else:
-        print("✅ Groq API key → OK")
+        print("OK Groq API key")
 
-    # Pexels
     if 'PENDIENTE' in config['pexels_api_key'] or not config['pexels_api_key']:
-        print("❌ Falta la clave de Pexels")
+        print("ERROR Falta la clave de Pexels")
         ok = False
     else:
-        print("✅ Pexels API key → OK")
+        print("OK Pexels API key")
 
-    # Pinterest (opcional)
     if pinterest_configured(config):
-        print("✅ Pinterest → Configurado")
+        print("OK Pinterest configurado")
         try:
             boards = get_pinterest_boards(config['pinterest']['access_token'])
-            print(f"   Tableros encontrados: {len(boards)}")
+            print(f"   Tableros: {len(boards)}")
             for b in boards:
-                print(f"   - {b['name']}  →  ID: {b['id']}")
+                print(f"   - {b['name']}  ID: {b['id']}")
         except Exception as e:
-            print(f"   ⚠️  Error conectando Pinterest: {e}")
+            print(f"   Advertencia Pinterest: {e}")
     else:
-        print("⏳ Pinterest → Pendiente (opcional, el sistema funciona sin él)")
+        print("Pendiente Pinterest (opcional)")
 
-    # WordPress
     print()
     for site in config['sites']:
         name = site['name']
         if 'PENDIENTE' in site['wp_user'] or 'PENDIENTE' in site['wp_password']:
-            print(f"❌ WordPress {name}: Faltan credenciales")
+            print(f"ERROR WordPress {name}: Faltan credenciales")
             ok = False
         else:
             try:
@@ -555,20 +746,19 @@ def check_config():
                     timeout=12
                 )
                 if r.status_code == 200:
-                    print(f"✅ WordPress {name} → Conectado")
+                    print(f"OK WordPress {name}")
                 else:
-                    print(f"❌ WordPress {name} → Error {r.status_code} (revisa usuario/contraseña)")
+                    print(f"ERROR WordPress {name}: Error {r.status_code}")
                     ok = False
             except Exception as e:
-                print(f"❌ WordPress {name} → No conecta: {e}")
+                print(f"ERROR WordPress {name}: {e}")
                 ok = False
 
     print()
     if ok:
-        print("✅ Todo correcto. Ejecuta 3-PUBLICAR-3-ARTICULOS.bat para empezar.\n")
+        print("Todo correcto. Ejecuta 3-PUBLICAR-3-ARTICULOS.bat para empezar.\n")
     else:
-        print("⚠️  Corrige los ❌ en config.json y vuelve a verificar.\n")
-
+        print("Corrige los errores en config.json y vuelve a verificar.\n")
     return ok
 
 
@@ -577,22 +767,21 @@ def check_config():
 # ─────────────────────────────────────────────
 
 def list_pinterest_boards():
-    """Muestra los IDs de los tableros de Pinterest del usuario."""
     config = load_json(CONFIG_FILE)
     token  = config.get('pinterest', {}).get('access_token', '')
 
     if not token or 'PENDIENTE' in token:
-        print("\n⚠️  Primero configura el access_token de Pinterest en config.json\n")
+        print("\nPrimero configura el access_token de Pinterest en config.json\n")
         return
 
-    print("\n📌 Tableros de Pinterest:\n")
+    print("\nTableros de Pinterest:\n")
     try:
         boards = get_pinterest_boards(token)
         for b in boards:
             print(f"  Nombre: {b['name']}")
             print(f"  ID:     {b['id']}")
             print()
-        print("Copia el ID del tablero que corresponde a cada web en config.json\n")
+        print("Copia el ID en config.json bajo pinterest.boards\n")
     except Exception as e:
         print(f"Error: {e}\n")
 
@@ -619,6 +808,6 @@ if __name__ == '__main__':
             run(int(args[0]))
         except ValueError:
             print(f"Comando no reconocido: {args[0]}")
-            print("Uso: python publisher.py [número de artículos]")
+            print("Uso: python publisher.py [numero de articulos]")
             print("     python publisher.py check")
             print("     python publisher.py pinterest-boards")
