@@ -282,7 +282,7 @@ Responde SOLO con JSON válido, sin texto adicional:
   "slug": "url-con-guiones-keyword-sin-acentos",
   "h1": "H1 del artículo (puede ser más largo que el SEO title)",
   "contenido_html": "Artículo completo en HTML. Mínimo 1800 palabras. INCLUYE los enlaces internos indicados si se proporcionaron.",
-  "descripcion_pinterest": "120-150 chars con emoji inicial y CTA",
+  "descripcion_pinterest": "140-160 chars: emoji + beneficio concreto + verbo de acción. Ej: '🤖 Aprende a usar ChatGPT gratis en 10 minutos con esta guía paso a paso. Sin conocimientos previos.'",
   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
   "categoria": "Categoría 1-3 palabras"
 }}"""
@@ -320,7 +320,7 @@ Responde SOLO con JSON válido, sin texto adicional:
 # IMÁGENES — PEXELS
 # ─────────────────────────────────────────────
 
-def get_pexels_image(keyword, pexels_api_key):
+def get_pexels_image(keyword, pexels_api_key, orientation='landscape'):
     fallbacks = [keyword, 'inteligencia artificial', 'tecnologia', 'computadora', 'digital']
     headers = {'Authorization': pexels_api_key}
 
@@ -329,7 +329,7 @@ def get_pexels_image(keyword, pexels_api_key):
             resp = requests.get(
                 'https://api.pexels.com/v1/search',
                 headers=headers,
-                params={'query': term, 'per_page': 15, 'orientation': 'landscape'},
+                params={'query': term, 'per_page': 15, 'orientation': orientation},
                 timeout=15
             )
             if resp.status_code == 200:
@@ -340,6 +340,7 @@ def get_pexels_image(keyword, pexels_api_key):
                         'url_original': photo['src']['original'],
                         'url_large':    photo['src']['large2x'],
                         'url_medium':   photo['src']['large'],
+                        'url_portrait': photo['src'].get('portrait', photo['src']['large2x']),
                         'alt':          photo.get('alt') or keyword,
                         'photographer': photo.get('photographer', '')
                     }
@@ -473,12 +474,24 @@ def get_pinterest_boards(access_token):
     raise Exception(f"Pinterest boards error {resp.status_code}: {resp.text[:200]}")
 
 
-def create_pinterest_pin(title, description, article_url, image_url, board_id, access_token):
+PINTEREST_HASHTAGS = {
+    'ia_principiantes': '#InteligenciaArtificial #IA #ChatGPT #AprendeIA #TecnologiaIA #AIEspanol #Automatizacion #ProductividadIA',
+    'prompts':          '#Prompts #PromptEngineering #ChatGPT #Claude #IA #PromptsChatGPT #AITips #InteligenciaArtificial',
+    'claude':           '#Claude #Anthropic #ChatGPT #IA #ClaudeAI #InteligenciaArtificial #AITool #TechEspanol',
+}
+
+def create_pinterest_pin(title, description, article_url, image_url, board_id, access_token, site_key=''):
+    hashtags = PINTEREST_HASHTAGS.get(site_key, '#InteligenciaArtificial #IA #ChatGPT')
+
+    # Descripción optimizada: beneficio + CTA + hashtags
+    pin_desc = f"{description}\n\n🔗 Lee el artículo completo (link en bio o en el pin)\n\n{hashtags}"
+
     payload = {
         'title':        title[:100],
-        'description':  (description or title)[:500],
+        'description':  pin_desc[:500],
         'link':         article_url,
         'board_id':     board_id,
+        'alt_text':     title[:500],
         'media_source': {
             'source_type': 'image_url',
             'url':         image_url
@@ -646,20 +659,26 @@ def run(articles_per_site=3):
                 print(f"        → Ping sitemap:", end=' ', flush=True)
                 ping_search_engines(wp_url)
 
-                # 7. PINTEREST
+                # 7. PINTEREST — imagen vertical (2:3) para mayor alcance
                 pin_url = ''
-                if use_pinterest and image_url:
+                if use_pinterest:
                     board_id = pinterest_cfg.get('boards', {}).get(pin_key, '')
                     if board_id and 'PENDIENTE' not in board_id:
                         try:
                             print(f"        → Creando pin en Pinterest...", end=' ', flush=True)
+                            # Busca imagen vertical específica para Pinterest (mejor CTR)
+                            pin_img = get_pexels_image(keyword, pexels_key, orientation='portrait')
+                            pin_image_url = pin_img['url_portrait'] if pin_img else image_url
+                            if not pin_image_url:
+                                raise Exception("Sin imagen para Pinterest")
                             pin_url = create_pinterest_pin(
                                 title        = article['titulo_seo'],
                                 description  = article.get('descripcion_pinterest', article['meta_descripcion']),
                                 article_url  = post_url,
-                                image_url    = image_url,
+                                image_url    = pin_image_url,
                                 board_id     = board_id,
-                                access_token = pinterest_cfg['access_token']
+                                access_token = pinterest_cfg['access_token'],
+                                site_key     = kw_key
                             )
                             print(f"OK  {pin_url}")
                         except Exception as pe:
