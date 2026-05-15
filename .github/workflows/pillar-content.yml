@@ -1,0 +1,43 @@
+name: Pillar Content — Artículos largos (1 por semana)
+
+# Ejecuta cada lunes a las 04:00 España (02:00 UTC) — límite Groq reseteado
+# También se puede lanzar manualmente desde GitHub Actions
+on:
+  schedule:
+    - cron: '0 2 * * 1'   # Lunes 04:00 España (Groq reseteado)
+  workflow_dispatch:
+
+jobs:
+  pillar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install requests
+
+      - name: Crear config.json desde secrets
+        working-directory: auto-publisher
+        env:
+          CONFIG_JSON: ${{ secrets.CONFIG_JSON }}
+        run: echo "$CONFIG_JSON" > config.json
+
+      - name: Generar 1 pillar article por web (5 en total)
+        working-directory: auto-publisher
+        run: python generar-pillar-content.py
+
+      - name: Subir log de pillar articles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pillar-log-${{ github.run_id }}
+          path: auto-publisher/publicaciones.csv
+          retention-days: 60

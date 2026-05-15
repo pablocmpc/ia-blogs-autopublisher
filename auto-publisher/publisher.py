@@ -320,11 +320,66 @@ Responde SOLO con JSON válido, sin texto adicional:
 # IMÁGENES — PEXELS
 # ─────────────────────────────────────────────
 
-def get_pexels_image(keyword, pexels_api_key, orientation='landscape'):
-    fallbacks = [keyword, 'inteligencia artificial', 'tecnologia', 'computadora', 'digital']
+# Queries de imagen por nicho — evita resultados irrelevantes (ej: playa en Ourense)
+NICHE_IMAGE_QUERIES = {
+    'turismo_ourense': [
+        'ourense galicia spain thermal hot springs river',
+        'ribeira sacra galicia sil river canyon vineyard',
+        'galicia spain green valley mountains village',
+        'galicia spain roman bridge cathedral historic',
+        'galicia spain wine ribeiro vineyard harvest',
+        'galicia spain rural tourism nature forest river',
+        'ourense galicia termas aguas termales',
+        'galicia spain gastronomy pulpo octopus food',
+        'galicia spain semana santa procession festival',
+    ],
+    'ia_principiantes': [
+        'artificial intelligence technology laptop screen',
+        'robot technology digital future blue',
+        'machine learning data visualization computer',
+        'ai chatbot smartphone technology',
+        'technology person learning computer',
+    ],
+    'prompts': [
+        'chatgpt ai prompt engineering keyboard computer',
+        'artificial intelligence text generation laptop',
+        'person typing computer ai technology workspace',
+        'creative writing technology inspiration',
+    ],
+    'claude': [
+        'anthropic claude ai assistant technology',
+        'artificial intelligence chat interface laptop',
+        'ai technology professional business computer',
+    ],
+    'bengalas_humo': [
+        'smoke bomb photography colorful outdoor',
+        'color smoke flare photography creative',
+        'smoke photography wedding outdoor colorful',
+        'flare bomb color photography portrait',
+    ],
+}
+
+def get_pexels_image(keyword, pexels_api_key, orientation='landscape', site_key=''):
+    """
+    Busca imagen relevante en Pexels.
+    Usa queries específicas por nicho para evitar imágenes irrelevantes
+    (ej: no poner playa para Ourense que es ciudad interior).
+    """
     headers = {'Authorization': pexels_api_key}
 
-    for term in fallbacks:
+    # Construir lista de búsquedas: keyword primero, luego queries del nicho, luego fallback genérico
+    niche_queries = NICHE_IMAGE_QUERIES.get(site_key, [])
+    fallback_generic = {
+        'turismo_ourense': ['galicia spain nature tourism', 'spain rural tourism village'],
+        'ia_principiantes': ['inteligencia artificial', 'tecnologia digital'],
+        'prompts':          ['ai technology writing', 'computer keyboard creative'],
+        'claude':           ['artificial intelligence assistant', 'ai technology'],
+        'bengalas_humo':    ['smoke photography colorful', 'color powder explosion'],
+    }.get(site_key, ['technology digital', 'business professional'])
+
+    search_terms = [keyword] + niche_queries[:3] + fallback_generic
+
+    for term in search_terms:
         try:
             resp = requests.get(
                 'https://api.pexels.com/v1/search',
@@ -425,15 +480,72 @@ def get_or_create_tags(tag_names, wp_url, wp_user, wp_pass):
     return ids
 
 
-def publish_to_wordpress(article, image_url, image_alt, cat_id, tag_ids, wp_url, wp_user, wp_pass):
+AFFILIATE_BLOCKS = {
+    'turismo_ourense': """
+<div style="background:#f0f7f0;border-left:4px solid #2d6a4f;border-radius:8px;padding:20px;margin:30px 0">
+<h3 style="color:#2d6a4f;margin-top:0">🏨 ¿Buscas alojamiento en Ourense?</h3>
+<p>Compara precios y encuentra los mejores hoteles, casas rurales y apartamentos con cancelación gratuita.</p>
+<p><a href="https://www.booking.com/searchresults.es.html?ss=Ourense" target="_blank" rel="noopener sponsored" style="background:#003580;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold">Ver alojamientos en Ourense →</a></p>
+<p style="font-size:12px;color:#666">*Enlace de afiliado. Sin coste extra para ti.</p>
+</div>""",
+    'bengalas_humo': """
+<div style="background:#fff8f0;border-left:4px solid #e07b00;border-radius:8px;padding:20px;margin:30px 0">
+<h3 style="color:#e07b00;margin-top:0">🛒 Consigue tus bengalas de humo</h3>
+<p>Las mejores bengalas de colores para fotografía, bodas y eventos. Envío rápido a toda España.</p>
+<p><a href="https://www.amazon.es/s?k=bengalas+humo+colores+fotografia" target="_blank" rel="noopener sponsored" style="background:#ff9900;color:#111;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold">Ver bengalas en Amazon →</a></p>
+<p style="font-size:12px;color:#666">*Enlace de afiliado Amazon. Sin coste extra para ti.</p>
+</div>""",
+    'ia_principiantes': """
+<div style="background:#f0f4ff;border-left:4px solid #4f46e5;border-radius:8px;padding:20px;margin:30px 0">
+<h3 style="color:#4f46e5;margin-top:0">🤖 Herramientas de IA recomendadas</h3>
+<p>Estas son las herramientas que uso personalmente para multiplicar mi productividad con inteligencia artificial.</p>
+<ul style="margin:10px 0">
+<li><a href="https://claude.ai" target="_blank" rel="noopener">Claude (Anthropic)</a> — El asistente de IA más preciso del mercado</li>
+<li><a href="https://chatgpt.com" target="_blank" rel="noopener">ChatGPT Plus</a> — Imprescindible para contenido y código</li>
+</ul>
+</div>""",
+    'prompts': """
+<div style="background:#f0fff4;border-left:4px solid #059669;border-radius:8px;padding:20px;margin:30px 0">
+<h3 style="color:#059669;margin-top:0">⚡ Potencia tus prompts con estas herramientas</h3>
+<p>Las herramientas que uso para crear y probar prompts profesionales cada día.</p>
+<ul style="margin:10px 0">
+<li><a href="https://claude.ai" target="_blank" rel="noopener">Claude Pro</a> — El mejor modelo para prompt engineering avanzado</li>
+<li><a href="https://chatgpt.com" target="_blank" rel="noopener">ChatGPT Plus</a> — Acceso a GPT-4 y generación de imágenes</li>
+</ul>
+</div>""",
+    'claude': """
+<div style="background:#faf5ff;border-left:4px solid #7c3aed;border-radius:8px;padding:20px;margin:30px 0">
+<h3 style="color:#7c3aed;margin-top:0">🚀 Prueba Claude Pro ahora</h3>
+<p>Accede a los modelos más avanzados de Anthropic, contexto de 200K tokens, Projects y mucho más.</p>
+<p><a href="https://claude.ai/upgrade" target="_blank" rel="noopener" style="background:#7c3aed;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold">Actualizar a Claude Pro →</a></p>
+</div>""",
+}
+
+def get_affiliate_block(kw_key):
+    return AFFILIATE_BLOCKS.get(kw_key, '')
+
+
+def publish_to_wordpress(article, image_url, image_alt, cat_id, tag_ids, wp_url, wp_user, wp_pass, media_id=None, author_id=None, affiliate_block=''):
     clean = wp_url.rstrip('/')
 
     content = article['contenido_html']
+
+    # Inyectar bloque de afiliados antes de la conclusión (o al final)
+    if affiliate_block:
+        if '<h2' in content:
+            # Insertar antes de la última sección H2
+            last_h2 = content.rfind('<h2')
+            content = content[:last_h2] + affiliate_block + content[last_h2:]
+        else:
+            content += affiliate_block
+
     if image_url:
         alt = (image_alt or article['titulo_seo']).replace('"', '&quot;')
+        # Imagen 1200px mínimo para Google Discover (large2x = 1280px ya está configurado)
         img_html = (
             f'<figure class="wp-block-image size-large">'
             f'<img src="{image_url}" alt="{alt}" '
+            f'width="1280" height="853" '
             f'style="width:100%;height:auto;border-radius:8px;margin-bottom:1.5em"/>'
             f'</figure>\n'
         )
@@ -448,11 +560,18 @@ def publish_to_wordpress(article, image_url, image_alt, cat_id, tag_ids, wp_url,
         'categories': [cat_id],
         'tags':       tag_ids,
     }
+    if media_id:
+        post['featured_media'] = media_id
+    if author_id:
+        post['author'] = author_id
 
-    resp = requests.post(
-        f'{clean}/wp-json/wp/v2/posts',
-        json=post, auth=(wp_user, wp_pass), timeout=45
-    )
+    # Soporte para sites con ?rest_route= (sin pretty permalinks)
+    if '/wp-json/' in clean or True:
+        url = f'{clean}/wp-json/wp/v2/posts'
+        resp = requests.post(url, json=post, auth=(wp_user, wp_pass), timeout=45)
+        if resp.status_code != 201:
+            url2 = f'{clean}/index.php?rest_route=/wp/v2/posts'
+            resp = requests.post(url2, json=post, auth=(wp_user, wp_pass), timeout=45)
     if resp.status_code == 201:
         return resp.json()
     raise Exception(f"WordPress {resp.status_code}: {resp.text[:300]}")
@@ -479,6 +598,81 @@ PINTEREST_HASHTAGS = {
     'prompts':          '#Prompts #PromptEngineering #ChatGPT #Claude #IA #PromptsChatGPT #AITips #InteligenciaArtificial',
     'claude':           '#Claude #Anthropic #ChatGPT #IA #ClaudeAI #InteligenciaArtificial #AITool #TechEspanol',
 }
+
+def post_to_facebook(title, excerpt, article_url, image_url, page_id, page_token):
+    """
+    Publica en Facebook estilo periódico profesional:
+    imagen grande subida directamente + texto + enlace + hashtags.
+    """
+    if not page_token or page_token == 'PENDIENTE':
+        return ''
+    try:
+        # Construir mensaje llamativo con emojis y CTA
+        # Primeras 2 frases del excerpt como gancho
+        gancho = excerpt[:180].rstrip() + ('...' if len(excerpt) > 180 else '')
+
+        # Detectar hashtags según la URL del sitio
+        if 'turismoourense' in article_url:
+            hashtags = '#TurismoOurense #Ourense #Galicia #TermasOurense #ViajarEspaña #TurismoGalicia #RibeiraSacra'
+        elif 'superprompts' in article_url:
+            hashtags = '#Prompts #ChatGPT #IA #PromptEngineering #InteligenciaArtificial #AITips'
+        elif 'guiaclaude' in article_url:
+            hashtags = '#Claude #Anthropic #IA #InteligenciaArtificial #ChatGPT #AIEspanol'
+        elif 'bengalasdehumo' in article_url:
+            hashtags = '#BengalasDeHumo #Fotografia #FotografiaCreativa #HumoColores #Bodas #Eventos'
+        elif 'bengalasdehumo' in article_url:
+            hashtags = '#BengalasDeHumo #Fotografia #FotografiaCreativa'
+        else:
+            hashtags = '#InteligenciaArtificial #IA #TecnologiaIA #AIEspanol'
+
+        message = (
+            f"📰 {title}\n\n"
+            f"{gancho}\n\n"
+            f"🔗 Leer artículo completo:\n{article_url}\n\n"
+            f"{hashtags}"
+        )
+
+        photo_id = None
+
+        # Descargar imagen y subirla como bytes (evita bloqueo de hotlinking de Pexels/WP)
+        if image_url:
+            try:
+                img_bytes = requests.get(image_url, timeout=30,
+                    headers={'User-Agent': 'Mozilla/5.0'}).content
+                r_photo = requests.post(
+                    f'https://graph.facebook.com/v19.0/{page_id}/photos',
+                    data={'published': 'false', 'access_token': page_token},
+                    files={'source': ('photo.jpg', img_bytes, 'image/jpeg')},
+                    timeout=60
+                )
+                if r_photo.status_code == 200:
+                    photo_id = r_photo.json().get('id')
+            except Exception:
+                pass  # Si falla la foto, publicar sin imagen
+
+        # Publicar post con foto adjunta o solo con link preview
+        post_data = {
+            'message':      message,
+            'access_token': page_token,
+        }
+        if photo_id:
+            post_data['attached_media'] = json.dumps([{'media_fbid': photo_id}])
+        else:
+            post_data['link'] = article_url  # Fallback: link preview
+
+        r = requests.post(
+            f'https://graph.facebook.com/v19.0/{page_id}/feed',
+            data=post_data, timeout=25
+        )
+        if r.status_code == 200:
+            post_id = r.json().get('id', '')
+            return f'https://www.facebook.com/{post_id}'
+        else:
+            print(f'Facebook error {r.status_code}: {r.text[:150]}')
+    except Exception as e:
+        print(f'Facebook error: {e}')
+    return ''
+
 
 def create_pinterest_pin(title, description, article_url, image_url, board_id, access_token, site_key=''):
     hashtags = PINTEREST_HASHTAGS.get(site_key, '#InteligenciaArtificial #IA #ChatGPT')
@@ -619,14 +813,15 @@ def run(articles_per_site=3):
                 image_url      = None
                 image_alt      = None
                 hosted_img_url = None
+                media_id_wp    = None
                 print(f"        → Buscando imagen Pexels...", end=' ', flush=True)
-                img = get_pexels_image(keyword, pexels_key)
+                img = get_pexels_image(keyword, pexels_key, site_key=kw_key)
 
                 if img:
                     image_url = img['url_large']
                     image_alt = img['alt']
                     print(f"OK  Subiendo a WordPress...", end=' ', flush=True)
-                    _, hosted_img_url = upload_image_to_wp(
+                    media_id_wp, hosted_img_url = upload_image_to_wp(
                         image_url, image_alt, wp_url, wp_user, wp_pass
                     )
                     print('OK' if hosted_img_url and hosted_img_url != image_url else '(URL Pexels)')
@@ -647,9 +842,12 @@ def run(articles_per_site=3):
 
                 # 5. PUBLICAR EN WORDPRESS
                 print(f"        → Publicando en WordPress...", end=' ', flush=True)
+                riker_id       = site.get('riker_author_id')
+                affiliate_html = get_affiliate_block(kw_key)
                 result   = publish_to_wordpress(
                     article, hosted_img_url, image_alt, cat_id, tag_ids,
-                    wp_url, wp_user, wp_pass
+                    wp_url, wp_user, wp_pass, media_id=media_id_wp,
+                    author_id=riker_id, affiliate_block=affiliate_html
                 )
                 post_url = result.get('link', '')
                 print(f"OK")
@@ -667,7 +865,7 @@ def run(articles_per_site=3):
                         try:
                             print(f"        → Creando pin en Pinterest...", end=' ', flush=True)
                             # Busca imagen vertical específica para Pinterest (mejor CTR)
-                            pin_img = get_pexels_image(keyword, pexels_key, orientation='portrait')
+                            pin_img = get_pexels_image(keyword, pexels_key, orientation='portrait', site_key=kw_key)
                             pin_image_url = pin_img['url_portrait'] if pin_img else image_url
                             if not pin_image_url:
                                 raise Exception("Sin imagen para Pinterest")
@@ -684,7 +882,21 @@ def run(articles_per_site=3):
                         except Exception as pe:
                             print(f"Error: {str(pe)[:80]}")
 
-                # 8. REGISTRAR
+                # 8. FACEBOOK
+                fb_token = site.get('facebook_page_token', config.get('facebook_page_token', ''))
+                fb_page  = site.get('facebook_page_id',    config.get('facebook_page_id', ''))
+                if fb_token and fb_token != 'PENDIENTE' and fb_page:
+                    print(f"        → Publicando en Facebook...", end=' ', flush=True)
+                    fb_url = post_to_facebook(
+                        article['titulo_seo'],
+                        article['meta_descripcion'],
+                        post_url,
+                        hosted_img_url or image_url or '',
+                        fb_page, fb_token
+                    )
+                    print(f"OK  {fb_url}" if fb_url else "Error")
+
+                # 9. REGISTRAR
                 log_publication(name, article['titulo_seo'], post_url, keyword, pin_url)
                 mark_keyword_used(keywords_data, kw_key, keyword)
 

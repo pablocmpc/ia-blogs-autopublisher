@@ -40,6 +40,6 @@ jobs:
           username: ${{ secrets.GMAIL_USER }}
           password: ${{ secrets.GMAIL_APP_PASSWORD }}
           subject: "📊 Informe semanal IA Blogs — ${{ github.run_number }}"
-          to: wizangospain@gmail.com
+          to: espiacm@gmail.com
           from: "IA Blogs Bot <${{ secrets.GMAIL_USER }}>"
           html_body: file://auto-publisher/informe-email.html
