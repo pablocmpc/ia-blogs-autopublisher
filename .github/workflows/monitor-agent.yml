@@ -1,0 +1,55 @@
+name: Monitor Agent 24/7 — Vigilante del Auto-Publisher
+
+# Corre cada 6 horas + manualmente
+on:
+  schedule:
+    - cron: '0 0 * * *'   # 02:00 España
+    - cron: '0 6 * * *'   # 08:00 España
+    - cron: '0 12 * * *'  # 14:00 España
+    - cron: '0 18 * * *'  # 20:00 España
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install requests
+
+      - name: Crear config.json desde secrets
+        working-directory: auto-publisher
+        env:
+          CONFIG_JSON: ${{ secrets.CONFIG_JSON }}
+        run: echo "$CONFIG_JSON" > config.json
+
+      - name: Ejecutar Monitor Agent
+        working-directory: auto-publisher
+        run: python monitor-agent.py
+        continue-on-error: true
+
+      - name: Guardar keywords si se reciclaron
+        if: always()
+        run: |
+          git config user.name "Monitor Bot"
+          git config user.email "monitor@autopublisher.ia"
+          git add auto-publisher/keywords.json || true
+          git diff --cached --quiet || git commit -m "bot: monitor — keywords recicladas [skip ci]"
+          git push || true
+
+      - name: Subir log del monitor
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-log-${{ github.run_id }}
+          path: auto-publisher/monitor.log
+          retention-days: 30
