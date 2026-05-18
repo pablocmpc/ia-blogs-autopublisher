@@ -222,9 +222,10 @@ def ping_search_engines(site_url):
 # GENERACIÓN DE ARTÍCULO CON GROQ
 # ─────────────────────────────────────────────
 
-def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None):
-    """Genera artículo SEO con E-E-A-T signals y enlazado interno."""
+def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None, model='llama-3.3-70b-versatile'):
+    """Genera artículo SEO con E-E-A-T signals, Google Discover y alto CPC."""
 
+    current_year = datetime.now().year
     internal_links_block = ""
     if related_articles:
         links_list = "\n".join(
@@ -240,20 +241,57 @@ Artículos a enlazar:
 Formato correcto: <a href="URL_DEL_ARTICULO">anchor text descriptivo</a>
 """
 
-    prompt = f"""Eres el mejor redactor SEO de España especializado en inteligencia artificial. Tu misión: escribir el artículo más útil, profundo y bien estructurado sobre este tema para posicionar en el Top 3 de Google en 2025.
+    # Detectar si el nicho es tech/IA/herramientas → activar instrucciones de alto CPC
+    niche_lower = niche_context.lower()
+    is_tech_niche = any(w in niche_lower for w in [
+        'ia ', 'inteligencia', 'prompt', 'claude', 'chatgpt', 'drone', 'tech',
+        'software', 'automatiz', 'saas', 'afiliado', 'amazon', 'herramienta'
+    ])
+
+    high_cpc_block = ""
+    if is_tech_niche:
+        high_cpc_block = """
+CONTENIDO DE ALTO CPC (maximiza ingresos AdSense):
+- Menciona herramientas y software de pago relacionados con el tema (SaaS, plataformas, subscripciones)
+- Usa términos que atraen anuncios caros: automatización, analítica, CRM, integración, API, productividad, ROI
+- Si el tema lo permite, incluye al menos 1 bloque de código <pre><code> con un prompt, comando o ejemplo real listo para copiar
+- Enfoca el beneficio en profesionales, emprendedores o desarrolladores (público de alto valor para anunciantes)
+- El usuario debe poder copiar algo y usarlo de inmediato → aumenta Time on Page
+
+IMAGEN DESTACADA (describe en el campo imagen_destacada):
+- Horizontal, mínimo 1200px de ancho, estilo tech/futurista
+- Colores vivos con contraste alto (azul eléctrico, negro, neón)
+- Sin texto en la imagen, apta para generarse con Midjourney o DALL-E
+"""
+
+    prompt = f"""AÑO ACTUAL: {current_year}
+INSTRUCCIÓN CRÍTICA DE FECHA: Siempre que escribas un año en cualquier parte del artículo (título, subtítulos, estadísticas, datos, guías, referencias temporales como "este año", "en {current_year}", "actualizado {current_year}") DEBES usar {current_year}. Nunca escribas {current_year - 1} ni ningún año anterior como si fuera el año actual.
+
+Actúa como Consultor SEO Experto y Redactor de Contenido enfocado en Google Discover y nichos de Alta Monetización (AdSense de Alto CPC).
+
+Tu misión: escribir el artículo más útil, profundo y bien estructurado sobre este tema para posicionar en el Top 3 de Google Y ser seleccionado para el feed de Google Discover.
 
 KEYWORD PRINCIPAL: "{keyword}"
 BLOG: {site_name}
 CONTEXTO DEL NICHO: {niche_context}
-{internal_links_block}
+{internal_links_block}{high_cpc_block}
+TÍTULO PARA GOOGLE DISCOVER:
+El título debe usar «clickbait sano»: curiosidad + alto beneficio, menos de 60 caracteres.
+Ejemplos de fórmulas ganadoras:
+  - «La función oculta de X que nadie usa»
+  - «Por qué el 90% de Y falla (y cómo evitarlo)»
+  - «Haz X en 5 minutos sin [obstáculo común]»
+  - «El truco de los expertos para X»
+
 SEÑALES E-E-A-T (imprescindibles para Google):
 - Demuestra experiencia práctica: ejemplos reales, casos de uso concretos, errores que cometen los principiantes
-- Cita estadísticas con fuente y año (ej: «Según un informe de McKinsey 2024...»)
+- Cita estadísticas con fuente y año (ej: «Según un informe de McKinsey {current_year}...»)
 - Perspectiva experta: qué haría un profesional diferente, qué atajos NO funcionan
 - Incluye al menos 1 dato sorprendente o contraintuitivo que demuestre profundidad real
 
 REQUISITOS TÉCNICOS:
-- Idioma: Español de España natural (usa «tú», nada de latinismos)
+- Idioma: Español de España natural (usa «tú», directo y práctico, sin rodeos teóricos)
+- Tono: profesional, fresco, sumamente práctico
 - Longitud: entre 1.800 y 2.500 palabras — artículo largo y completo
 - Keyword en: H1, primer párrafo, al menos 3 H2, cuerpo de forma natural
 - Densidad de keyword: 1-1.5% (orgánica, no spam)
@@ -262,27 +300,28 @@ REQUISITOS TÉCNICOS:
 - <strong> en conceptos clave (5-8 por artículo)
 - Al menos 1 tabla HTML comparativa si el tema lo permite
 - 1-2 <blockquote> con citas o estadísticas impactantes
-- Titulo SEO con número o power word (ej: «7 formas de...», «La guía definitiva para...», «Por qué el 90% de...»)
 
 ESTRUCTURA OBLIGATORIA:
-1. H1 con keyword exacta y gancho potente (promete resultado concreto)
-2. Intro de 2-3 líneas con dato impactante o pregunta que genere curiosidad + keyword
+1. H1 con keyword + gancho potente (menos de 60 chars si posible, promete resultado concreto)
+2. Intro de 2-3 líneas: dato impactante o pregunta que genere curiosidad inmediata + keyword
 3. «En este artículo aprenderás:» con 4-5 puntos concretos en lista
 4. 5-7 secciones H2 con contenido denso y práctico
 5. Subsecciones H3 donde aporten valor real
 6. Sección «Paso a paso» o «Guía práctica» con lista numerada detallada
-7. Sección «Errores comunes que debes evitar» (captura búsquedas de comparación)
-8. Sección «FAQ — Preguntas frecuentes» con exactamente 5 preguntas en H3 (búsquedas reales de Google, específicas) con respuestas de 3-4 líneas cada una
-9. Conclusión con síntesis del valor principal y CTA suave hacia otro artículo
+7. Si es nicho tech/IA: incluir bloque <pre><code> con prompt o ejemplo listo para copiar
+8. Sección «Errores comunes que debes evitar» (captura búsquedas de comparación)
+9. Sección «FAQ — Preguntas frecuentes» con exactamente 5 preguntas en H3 (búsquedas reales de Google, específicas) con respuestas de 3-4 líneas cada una
+10. Conclusión con síntesis del valor principal y CTA suave hacia otro artículo
 
 Responde SOLO con JSON válido, sin texto adicional:
 {{
-  "titulo_seo": "Título SEO 55-60 chars con keyword al inicio + número o power word",
+  "titulo_seo": "Título <60 chars con clickbait sano + keyword + curiosidad/beneficio",
   "meta_descripcion": "Meta 150-155 chars con keyword, beneficio concreto y CTA",
   "slug": "url-con-guiones-keyword-sin-acentos",
   "h1": "H1 del artículo (puede ser más largo que el SEO title)",
+  "imagen_destacada": "Descripción exacta para generar con IA: composición, colores, estilo, elementos visuales. Ej: 'Drone DJI volando sobre ciudad futurista al amanecer, luces de neón azul y naranja, estilo tech cinematográfico, fondo oscuro, resolución 1200x630'",
   "contenido_html": "Artículo completo en HTML. Mínimo 1800 palabras. INCLUYE los enlaces internos indicados si se proporcionaron.",
-  "descripcion_pinterest": "140-160 chars: emoji + beneficio concreto + verbo de acción. Ej: '🤖 Aprende a usar ChatGPT gratis en 10 minutos con esta guía paso a paso. Sin conocimientos previos.'",
+  "descripcion_pinterest": "140-160 chars: emoji + beneficio concreto + verbo de acción.",
   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
   "categoria": "Categoría 1-3 palabras"
 }}"""
@@ -292,7 +331,7 @@ Responde SOLO con JSON válido, sin texto adicional:
         'Content-Type': 'application/json'
     }
     payload = {
-        'model': 'llama-3.3-70b-versatile',
+        'model': model,
         'messages': [{'role': 'user', 'content': prompt}],
         'temperature': 0.72,
         'max_tokens': 6000,
@@ -314,6 +353,62 @@ Responde SOLO con JSON válido, sin texto adicional:
             raw = raw[4:]
 
     return json.loads(raw.strip())
+
+
+def validate_article(article):
+    """Valida que el artículo generado tenga todos los campos necesarios y contenido mínimo."""
+    required = ['titulo_seo', 'meta_descripcion', 'slug', 'contenido_html']
+    for field in required:
+        if not article.get(field, '').strip():
+            raise Exception(f"Artículo inválido: campo '{field}' vacío")
+    if len(article['contenido_html']) < 800:
+        raise Exception(f"Contenido demasiado corto: {len(article['contenido_html'])} chars")
+    # Limpiar slug: sin acentos, solo letras, números y guiones
+    article['slug'] = re.sub(r'[^a-z0-9-]', '', article['slug'].lower().replace(' ', '-'))
+    if not article['slug']:
+        article['slug'] = re.sub(r'[^a-z0-9-]', '', article['titulo_seo'].lower().replace(' ', '-'))[:80]
+    return article
+
+
+def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_articles=None):
+    """Genera artículo con fallback inteligente entre modelos Groq.
+    Distingue errores TPD (cuota diaria agotada → cambiar modelo)
+    de TPM (límite por minuto → esperar y reintentar mismo modelo).
+    """
+    models = [
+        'llama-3.3-70b-versatile',
+        'openai/gpt-oss-120b',
+        'meta-llama/llama-4-scout-17b-16e-instruct',
+    ]
+    last_err = None
+    for model in models:
+        for attempt in range(2):
+            try:
+                article = generate_article(
+                    keyword, niche_context, site_name, groq_key,
+                    related_articles=related_articles, model=model
+                )
+                return validate_article(article)
+            except Exception as e:
+                err_str = str(e)
+                last_err = e
+                is_429 = '429' in err_str
+                is_tpd = is_429 and ('per day' in err_str or 'TPD' in err_str or 'tokens per day' in err_str)
+                is_tpm = is_429 and not is_tpd
+                if is_tpd:
+                    break  # Cuota diaria agotada → probar siguiente modelo
+                if is_tpm:
+                    wait = 65 if attempt == 0 else 0
+                    if wait:
+                        print(f'TPM limit {model.split("/")[-1][:12]}, esperando {wait}s...')
+                        time.sleep(wait)
+                        continue
+                    break  # Ya reintentamos, saltar al siguiente modelo
+                if is_429:
+                    break  # Otro tipo de 429, saltar modelo
+                # Error no relacionado con rate limit → saltar al siguiente modelo
+                break
+    raise last_err or Exception("Todos los modelos Groq fallaron")
 
 
 # ─────────────────────────────────────────────
@@ -356,6 +451,16 @@ NICHE_IMAGE_QUERIES = {
         'color smoke flare photography creative',
         'smoke photography wedding outdoor colorful',
         'flare bomb color photography portrait',
+    ],
+    'drones': [
+        'drone flying aerial photography blue sky',
+        'dji drone quadcopter aerial camera',
+        'drone aerial view landscape photography',
+        'fpv drone racing pilot outdoor',
+        'drone photography sunset landscape aerial',
+        'quadcopter drone outdoor flight nature',
+        'aerial drone view city landscape',
+        'drone technology camera flying outdoor',
     ],
 }
 
@@ -405,36 +510,53 @@ def get_pexels_image(keyword, pexels_api_key, orientation='landscape', site_key=
 
 
 def upload_image_to_wp(image_url, alt_text, wp_url, wp_user, wp_pass):
-    try:
-        img = requests.get(image_url, timeout=30)
-        if img.status_code != 200:
-            return None, image_url
+    clean = wp_url.rstrip('/')
+    img_data = None
+    for attempt in range(3):
+        try:
+            r = requests.get(image_url, timeout=30)
+            if r.status_code == 200:
+                img_data = r.content
+                break
+        except Exception:
+            if attempt < 2:
+                time.sleep(5)
+    if not img_data:
+        return None, None
 
-        clean = wp_url.rstrip('/')
-        resp = requests.post(
-            f'{clean}/wp-json/wp/v2/media',
-            headers={
-                'Content-Disposition': 'attachment; filename=imagen-articulo.jpg',
-                'Content-Type': 'image/jpeg'
-            },
-            data=img.content,
-            auth=(wp_user, wp_pass),
-            timeout=45
-        )
-        if resp.status_code in (200, 201):
-            media = resp.json()
-            media_id = media['id']
-            hosted_url = media.get('source_url', image_url)
-            requests.post(
-                f'{clean}/wp-json/wp/v2/media/{media_id}',
-                json={'alt_text': alt_text},
+    for attempt in range(3):
+        try:
+            resp = requests.post(
+                f'{clean}/wp-json/wp/v2/media',
+                headers={
+                    'Content-Disposition': 'attachment; filename=imagen-articulo.jpg',
+                    'Content-Type': 'image/jpeg'
+                },
+                data=img_data,
                 auth=(wp_user, wp_pass),
-                timeout=15
+                timeout=60
             )
-            return media_id, hosted_url
-    except Exception as e:
-        print(f'     Advertencia subiendo imagen: {e}')
-    return None, image_url
+            if resp.status_code in (200, 201):
+                media = resp.json()
+                media_id = media['id']
+                hosted_url = media.get('source_url', '')
+                try:
+                    requests.post(
+                        f'{clean}/wp-json/wp/v2/media/{media_id}',
+                        json={'alt_text': alt_text},
+                        auth=(wp_user, wp_pass),
+                        timeout=15
+                    )
+                except Exception:
+                    pass
+                return media_id, hosted_url
+            if attempt < 2:
+                time.sleep(5)
+        except Exception:
+            if attempt < 2:
+                time.sleep(5)
+    print('     Advertencia: no se pudo subir la imagen a WordPress')
+    return None, None
 
 
 # ─────────────────────────────────────────────
@@ -519,6 +641,13 @@ AFFILIATE_BLOCKS = {
 <p>Accede a los modelos más avanzados de Anthropic, contexto de 200K tokens, Projects y mucho más.</p>
 <p><a href="https://claude.ai/upgrade" target="_blank" rel="noopener" style="background:#7c3aed;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold">Actualizar a Claude Pro →</a></p>
 </div>""",
+    'drones': """
+<div style="background:#0f172a;border-left:4px solid #2563eb;border-radius:8px;padding:20px;margin:30px 0">
+<h3 style="color:#60a5fa;margin-top:0">🚁 Encuentra el mejor precio en Amazon</h3>
+<p style="color:#94a3b8">Los drones que analizamos en FlyDrones.es los puedes comprar en Amazon España con entrega rápida y garantía oficial.</p>
+<p><a href="https://www.amazon.es/s?k=drones+dji&tag=flydrones-21" target="_blank" rel="noopener sponsored" style="background:#ff9900;color:#000;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block">Ver drones en Amazon →</a></p>
+<p style="font-size:12px;color:#64748b">*Enlace de afiliado Amazon. Sin coste extra para ti. Nos ayuda a seguir haciendo reviews independientes.</p>
+</div>""",
 }
 
 def get_affiliate_block(kw_key):
@@ -560,21 +689,49 @@ def publish_to_wordpress(article, image_url, image_alt, cat_id, tag_ids, wp_url,
         'categories': [cat_id],
         'tags':       tag_ids,
     }
-    if media_id:
-        post['featured_media'] = media_id
     if author_id:
         post['author'] = author_id
 
-    # Soporte para sites con ?rest_route= (sin pretty permalinks)
-    if '/wp-json/' in clean or True:
-        url = f'{clean}/wp-json/wp/v2/posts'
-        resp = requests.post(url, json=post, auth=(wp_user, wp_pass), timeout=45)
-        if resp.status_code != 201:
-            url2 = f'{clean}/index.php?rest_route=/wp/v2/posts'
-            resp = requests.post(url2, json=post, auth=(wp_user, wp_pass), timeout=45)
-    if resp.status_code == 201:
-        return resp.json()
-    raise Exception(f"WordPress {resp.status_code}: {resp.text[:300]}")
+    url = f'{clean}/wp-json/wp/v2/posts'
+    resp = None
+    for attempt in range(3):
+        try:
+            resp = requests.post(url, json=post, auth=(wp_user, wp_pass), timeout=60)
+            if resp.status_code == 201:
+                break
+            if resp.status_code == 404 and attempt == 0:
+                # Fallback for sites without pretty permalinks
+                url = f'{clean}/index.php?rest_route=/wp/v2/posts'
+                continue
+            if resp.status_code >= 500 and attempt < 2:
+                time.sleep(10)
+                continue
+            break
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(10)
+                continue
+            raise
+
+    if resp is None or resp.status_code != 201:
+        code = resp.status_code if resp is not None else 'N/A'
+        body = resp.text[:300] if resp is not None else ''
+        raise Exception(f"WordPress {code}: {body}")
+
+    post_data = resp.json()
+    # Add featured_media via separate PATCH (direct POST causes PHP fatal on some hosts)
+    if media_id:
+        post_id = post_data.get('id')
+        if post_id:
+            try:
+                requests.post(
+                    f'{clean}/wp-json/wp/v2/posts/{post_id}',
+                    json={'featured_media': media_id},
+                    auth=(wp_user, wp_pass), timeout=20
+                )
+            except Exception:
+                pass
+    return post_data
 
 
 # ─────────────────────────────────────────────
@@ -597,13 +754,17 @@ PINTEREST_HASHTAGS = {
     'ia_principiantes': '#InteligenciaArtificial #IA #ChatGPT #AprendeIA #TecnologiaIA #AIEspanol #Automatizacion #ProductividadIA',
     'prompts':          '#Prompts #PromptEngineering #ChatGPT #Claude #IA #PromptsChatGPT #AITips #InteligenciaArtificial',
     'claude':           '#Claude #Anthropic #ChatGPT #IA #ClaudeAI #InteligenciaArtificial #AITool #TechEspanol',
+    'drones':           '#Drones #DJI #FotografiaAerea #Drone #DJIMini #FPV #PhotographyDrone #AerialPhotography #DroneLife #DroneEspaña',
+    'turismo_ourense':  '#TurismoOurense #Ourense #Galicia #TermasOurense #ViajarEspaña #TurismoGalicia #RibeiraSacra',
+    'bengalas_humo':    '#BengalasDeHumo #Fotografia #HumoColores #FotografiaCreativa #SmokeBomb #ColorSmoke',
 }
 
 def post_to_facebook(title, excerpt, article_url, image_url, page_id, page_token):
     """
-    Publica en Facebook estilo periódico profesional:
-    imagen grande subida directamente + texto + enlace + hashtags.
+    Solo para Turismo Ourense — Make.com gestiona este paso automáticamente.
     """
+    if 'turismoourense' not in str(article_url):
+        return ''  # solo Turismo Ourense usa Facebook directo
     if not page_token or page_token == 'PENDIENTE':
         return ''
     try:
@@ -620,8 +781,8 @@ def post_to_facebook(title, excerpt, article_url, image_url, page_id, page_token
             hashtags = '#Claude #Anthropic #IA #InteligenciaArtificial #ChatGPT #AIEspanol'
         elif 'bengalasdehumo' in article_url:
             hashtags = '#BengalasDeHumo #Fotografia #FotografiaCreativa #HumoColores #Bodas #Eventos'
-        elif 'bengalasdehumo' in article_url:
-            hashtags = '#BengalasDeHumo #Fotografia #FotografiaCreativa'
+        elif 'flydrones' in article_url or 'teal-meerkat' in article_url:
+            hashtags = '#Drones #DJI #FotografiaAerea #DroneLife #DroneEspaña #FPV #AerialPhotography'
         else:
             hashtags = '#InteligenciaArtificial #IA #TecnologiaIA #AIEspanol'
 
@@ -640,7 +801,7 @@ def post_to_facebook(title, excerpt, article_url, image_url, page_id, page_token
                 img_bytes = requests.get(image_url, timeout=30,
                     headers={'User-Agent': 'Mozilla/5.0'}).content
                 r_photo = requests.post(
-                    f'https://graph.facebook.com/v19.0/{page_id}/photos',
+                    f'https://graph.facebook.com/v22.0/{page_id}/photos',
                     data={'published': 'false', 'access_token': page_token},
                     files={'source': ('photo.jpg', img_bytes, 'image/jpeg')},
                     timeout=60
@@ -661,7 +822,7 @@ def post_to_facebook(title, excerpt, article_url, image_url, page_id, page_token
             post_data['link'] = article_url  # Fallback: link preview
 
         r = requests.post(
-            f'https://graph.facebook.com/v19.0/{page_id}/feed',
+            f'https://graph.facebook.com/v22.0/{page_id}/feed',
             data=post_data, timeout=25
         )
         if r.status_code == 200:
@@ -802,7 +963,7 @@ def run(articles_per_site=3):
 
                 # 1. GENERAR ARTÍCULO
                 print(f"        → Generando articulo con Groq...", end=' ', flush=True)
-                article = generate_article(
+                article = generate_with_fallback(
                     keyword, site['niche_context'], name, groq_key,
                     related_articles=related
                 )
@@ -824,7 +985,10 @@ def run(articles_per_site=3):
                     media_id_wp, hosted_img_url = upload_image_to_wp(
                         image_url, image_alt, wp_url, wp_user, wp_pass
                     )
-                    print('OK' if hosted_img_url and hosted_img_url != image_url else '(URL Pexels)')
+                    if hosted_img_url:
+                        print('OK')
+                    else:
+                        print('(upload fallido, sin imagen destacada)')
                 else:
                     print('(no encontrada)')
 
@@ -882,21 +1046,7 @@ def run(articles_per_site=3):
                         except Exception as pe:
                             print(f"Error: {str(pe)[:80]}")
 
-                # 8. FACEBOOK
-                fb_token = site.get('facebook_page_token', config.get('facebook_page_token', ''))
-                fb_page  = site.get('facebook_page_id',    config.get('facebook_page_id', ''))
-                if fb_token and fb_token != 'PENDIENTE' and fb_page:
-                    print(f"        → Publicando en Facebook...", end=' ', flush=True)
-                    fb_url = post_to_facebook(
-                        article['titulo_seo'],
-                        article['meta_descripcion'],
-                        post_url,
-                        hosted_img_url or image_url or '',
-                        fb_page, fb_token
-                    )
-                    print(f"OK  {fb_url}" if fb_url else "Error")
-
-                # 9. REGISTRAR
+                # 8. REGISTRAR (Facebook gestionado por Make.com automáticamente)
                 log_publication(name, article['titulo_seo'], post_url, keyword, pin_url)
                 mark_keyword_used(keywords_data, kw_key, keyword)
 
