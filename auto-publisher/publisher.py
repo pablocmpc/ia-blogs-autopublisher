@@ -1046,7 +1046,22 @@ def run(articles_per_site=3):
                         except Exception as pe:
                             print(f"Error: {str(pe)[:80]}")
 
-                # 8. REGISTRAR (Facebook gestionado por Make.com automáticamente)
+                # 8. FACEBOOK — solo para Turismo Ourense
+                if 'turismoourense' in wp_url:
+                    fb_page  = config.get('facebook_page_id', '')
+                    fb_token = config.get('facebook_page_token', '')
+                    if fb_page and fb_token:
+                        print(f"        → Publicando en Facebook...", end=' ', flush=True)
+                        fb_url = post_to_facebook(
+                            article['titulo_seo'],
+                            article['meta_descripcion'],
+                            post_url,
+                            hosted_img_url or image_url or '',
+                            fb_page, fb_token
+                        )
+                        print(f"OK  {fb_url}" if fb_url else "Error (continua sin Facebook)")
+
+                # 9. REGISTRAR
                 log_publication(name, article['titulo_seo'], post_url, keyword, pin_url)
                 mark_keyword_used(keywords_data, kw_key, keyword)
 
