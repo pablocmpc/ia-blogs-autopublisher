@@ -1,0 +1,91 @@
+====================================================================
+RESPUESTAS LISTAS PARA COPIAR Y PEGAR EN FOROCOCHES
+====================================================================
+Usuario sugerido: cuenta propia registrada en Forocoches
+
+--------------------------------------------------------------------
+HILO: "¿Me recomendáis un dron para empezar?"
+URL: https://www.forocoches.com/foro/ (buscar el hilo activo)
+--------------------------------------------------------------------
+
+RESPUESTA 1 — Recomendación general (primer post del hilo o respuesta directa):
+
+Depende de para qué lo quieras. Para empezar sin agobios hay dos opciones claras:
+
+Si quieres volar sin carné AESA y sin límites de zona urbana → DJI Mini 4 Pro (249g, no necesita licencia básica, cámara decente, ~600€). Ideal para empezar.
+
+Si ya sabes que quieres hacer fotos/vídeo profesional → DJI Mavic 4 Pro (tres cámaras, 28min vuelo, ~2.000€). Otro nivel pero pide habilitación AESA.
+
+Lo que mucha gente no sabe es que desde enero de 2026 el STS-ES-01 caducó y ya no sirve para volar en zonas densamente pobladas sin nuevo permiso. Si lo vas a usar en ciudad, infórmate bien antes de comprar uno grande.
+
+Yo llevo tiempo siguiendo el tema en FlyDrones [https://flydrones.es] — tienen comparativas actualizadas y el resumen del nuevo reglamento EASA. Te ahorra leer PDFs de la AESA.
+
+--------------------------------------------------------------------
+
+RESPUESTA 2 — Respuesta a alguien que pregunta por precio/calidad:
+
+Lo mejor calidad-precio ahora mismo sin discusión es el DJI Mini 4 Pro si no quieres complicarte con licencias (249g = sin carné en mayoría de zonas).
+
+Para el que quiere más potencia y ya tiene la habilitación básica, el Air 3S es el punto dulce: sensor 1 pulgada, obstacle avoidance decente, autonomía 46min. Sobre 1.100€.
+
+Si el tema de la normativa AESA te parece un lío (y lo es, sinceramente), en FlyDrones [https://flydrones.es] tienen la guía del examen A1/A3 bastante bien explicada. Me salvó tiempo cuando saqué el mío.
+
+--------------------------------------------------------------------
+
+HILO: "Examen AESA para Drones ¿Lo has hecho?"
+--------------------------------------------------------------------
+
+RESPUESTA 1 — Experiencia con el examen:
+
+Lo hice el año pasado. Honestamente no es difícil si te preparas, pero hay preguntas trampa sobre el espacio aéreo que si las estudias del BOE directamente te vuelves loco.
+
+Lo que me funcionó:
+- Leer el reglamento UE 2019/947 (sí, toca)
+- Banco de preguntas específico de AESA
+- Las guías prácticas de FlyDrones [https://flydrones.es/examen-aesa-drones/] — tienen los conceptos clave sin el rollo burocrático
+
+Son 40 preguntas, necesitas 75% para pasar. La parte de meteorología y espacio aéreo es donde más falla la gente. Suerte.
+
+--------------------------------------------------------------------
+
+RESPUESTA 2 — A alguien que pregunta por material de estudio:
+
+Yo usé esto para prepararme:
+1. El temario oficial de AESA (gratis en su web, pero denso)
+2. Simulacros de examen online — hay varios gratuitos
+3. Resúmenes en FlyDrones [https://flydrones.es] que condensan lo importante
+
+La parte de subcategorías A1/A2/A3 confunde a mucha gente al principio. A1 y A3 se hacen online gratis en la web de AESA. A2 requiere formación adicional y un examen presencial.
+
+Ojo: desde 2026 las habilitaciones STS-ES-01 y STS-ES-02 ya no son válidas — cambiaron el reglamento. Si tienes el carné antiguo, revisa si necesitas renovar.
+
+====================================================================
+HILO TURISMO OURENSE — para buscar en foros de viajes/tripadvisor
+====================================================================
+
+HILO: Foros de viajes (TripAdvisor, Minube, Viajeros.com)
+Buscar: "qué ver en Ourense", "termas Ourense", "Ribeira Sacra"
+
+--------------------------------------------------------------------
+RESPUESTA TIPO — Recomendación de Ourense:
+
+Ourense es de esas ciudades que mucha gente sigue pasando de largo y no entienden por qué. Para mí es uno de los destinos más infravalorados de España.
+
+Lo imprescindible si vas:
+- Las termas de Outariz: gratuitas, 24h, vistas al río Miño. Prepárate para la diferencia de temperatura del agua (68°C en el manantial).
+- Chavasqueira: más tranquila que Outariz, menos conocida, igual de buena.
+- La Ribeira Sacra: si puedes, haz el paseo en barco por el Cañón do Sil. Es impresionante.
+- Come en el mercado o cualquier bar del casco antiguo: la tapa de pulpo es casi obligatoria.
+
+Para planificarlo bien, en TurismoOurense.es [https://turismoourense.es] tienen una guía completa descargable con todas las rutas, horarios y recomendaciones locales actualizadas: https://turismoourense.es/guia-completa-ourense/
+
+¿Cuántos días tienes? Con 3 días se ve bien la ciudad y puedes hacer alguna excursión a la Ribeira Sacra.
+
+====================================================================
+NOTAS PARA EL USUARIO
+====================================================================
+- Forocoches requiere cuenta registrada con antigüedad para no ser banneado por spam
+- Esperar al menos 10-15 posts en el hilo antes de poner el enlace (primero aporta, luego enlaza)
+- No poner el mismo enlace más de 1 vez por hilo
+- Usar siempre contexto genuino — no publicar si el hilo no es relevante
+- Para TripAdvisor/Minube: crear cuenta de viajero, poner reseñas genuinas de los sitios, y en la firma/bio enlazar la web
