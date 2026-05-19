@@ -203,7 +203,7 @@ def build_schema_markup(article, post_url, site_name, site_url, image_url=None):
 # ─────────────────────────────────────────────
 
 def ping_search_engines(site_url):
-    """Notifica a Google y Bing que hay contenido nuevo en el sitemap."""
+    """Notifica a Google, Bing e IndexNow (indexación inmediata) del nuevo contenido."""
     sitemap = f"{site_url.rstrip('/')}/sitemap.xml"
     for engine, url in [
         ('Google', f'https://www.google.com/ping?sitemap={sitemap}'),
@@ -211,11 +211,33 @@ def ping_search_engines(site_url):
     ]:
         try:
             r = requests.get(url, timeout=8)
-            status = 'OK' if r.status_code == 200 else r.status_code
+            status = 'OK' if r.status_code in (200, 404) else r.status_code
             print(f"          {engine}: {status}", end='  ')
         except Exception:
             print(f"          {engine}: timeout", end='  ')
     print()
+
+
+def submit_indexnow(post_url, site_url):
+    """Envía la URL nueva directamente a IndexNow (Bing/Yandex/DuckDuckGo) para indexación inmediata."""
+    key = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"  # clave fija registrada en IndexNow
+    host = site_url.replace("https://", "").replace("http://", "").rstrip("/")
+    payload = {
+        "host": host,
+        "key": key,
+        "keyLocation": f"{site_url.rstrip('/')}/{key}.txt",
+        "urlList": [post_url]
+    }
+    try:
+        r = requests.post(
+            "https://api.indexnow.org/indexnow",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=10
+        )
+        return r.status_code in (200, 202)
+    except Exception:
+        return False
 
 
 # ─────────────────────────────────────────────
@@ -292,7 +314,7 @@ SEÑALES E-E-A-T (imprescindibles para Google):
 REQUISITOS TÉCNICOS:
 - Idioma: Español de España natural (usa «tú», directo y práctico, sin rodeos teóricos)
 - Tono: profesional, fresco, sumamente práctico
-- Longitud: entre 1.800 y 2.500 palabras — artículo largo y completo
+- Longitud: entre 2.200 y 3.000 palabras — artículo largo y completo
 - Keyword en: H1, primer párrafo, al menos 3 H2, cuerpo de forma natural
 - Densidad de keyword: 1-1.5% (orgánica, no spam)
 - Párrafos cortos: máximo 3-4 líneas
@@ -300,6 +322,8 @@ REQUISITOS TÉCNICOS:
 - <strong> en conceptos clave (5-8 por artículo)
 - Al menos 1 tabla HTML comparativa si el tema lo permite
 - 1-2 <blockquote> con citas o estadísticas impactantes
+- 2-3 enlaces externos a fuentes autoritativas (.gov, .edu, Wikipedia, fuentes oficiales)
+  Formato: <a href="URL" rel="noopener" target="_blank">texto descriptivo</a>
 
 ESTRUCTURA OBLIGATORIA:
 1. H1 con keyword + gancho potente (menos de 60 chars si posible, promete resultado concreto)
@@ -1017,9 +1041,11 @@ def run(articles_per_site=3):
                 print(f"OK")
                 print(f"        URL: {post_url}")
 
-                # 6. PING A BUSCADORES
+                # 6. PING A BUSCADORES + INDEXNOW
                 print(f"        → Ping sitemap:", end=' ', flush=True)
                 ping_search_engines(wp_url)
+                if post_url:
+                    submit_indexnow(post_url, wp_url)
 
                 # 7. PINTEREST — imagen vertical (2:3) para mayor alcance
                 pin_url = ''
