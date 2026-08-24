@@ -16,7 +16,7 @@ on:
 jobs:
   publicar:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 120
 
     steps:
       - name: Checkout código
