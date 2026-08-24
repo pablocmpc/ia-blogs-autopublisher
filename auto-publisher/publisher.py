@@ -492,7 +492,7 @@ ESTRUCTURA OBLIGATORIA:
 4. 5-7 secciones H2 con contenido denso y práctico
 5. Subsecciones H3 donde aporten valor real
 6. Sección «Paso a paso» o «Guía práctica» con lista numerada detallada
-7. Si es nicho tech/IA: incluir bloque <pre><code> con prompt o ejemplo listo para copiar
+7. PROHIBIDO incluir bloques de código <pre><code> a menos que el tema sea explícitamente de programación o tecnología
 8. Sección «Errores comunes que debes evitar» (captura búsquedas de comparación)
 9. Sección «FAQ — Preguntas frecuentes» con exactamente 5 preguntas en H3 (búsquedas reales de Google, específicas) con respuestas de 3-4 líneas cada una
 10. Conclusión con síntesis del valor principal y CTA suave hacia otro artículo
@@ -539,8 +539,20 @@ Responde SOLO con JSON válido, sin texto adicional:
     return json.loads(raw.strip())
 
 
-def validate_article(article):
+def sanitize_content(html, is_tech=False):
+    """Elimina bloques de código de artículos no-tech."""
+    if is_tech:
+        return html
+    # Quitar cualquier <pre>...</pre> que contenga código (no turismo/cocina)
+    cleaned = re.sub(r'<pre[^>]*>.*?</pre>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    return cleaned
+
+
+def validate_article(article, is_tech=False):
     """Valida que el artículo generado tenga todos los campos necesarios y contenido mínimo."""
+    # Sanitizar primero: eliminar bloques de código en artículos no-tech
+    if 'contenido_html' in article:
+        article['contenido_html'] = sanitize_content(article['contenido_html'], is_tech)
     required = ['titulo_seo', 'meta_descripcion', 'slug', 'contenido_html']
     for field in required:
         if not article.get(field, '').strip():
@@ -556,7 +568,7 @@ def validate_article(article):
     return article
 
 
-def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_articles=None):
+def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_articles=None, is_tech=False):
     """Genera artículo con fallback inteligente entre modelos Groq.
     Distingue errores TPD (cuota diaria agotada → cambiar modelo)
     de TPM (límite por minuto → esperar y reintentar mismo modelo).
@@ -574,7 +586,7 @@ def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_
                 keyword, niche_ctx, site_name, groq_key,
                 related_articles=links, model=MODEL
             )
-            return validate_article(article)
+            return validate_article(article, is_tech=is_tech)
         except Exception as e:
             err_str = str(e)
             last_err = e
@@ -1581,9 +1593,14 @@ def _run_inner(articles_per_site=3, only_site=None):
 
                 # 1. GENERAR ARTÍCULO
                 print(f"        → Generando articulo con Groq...", end=' ', flush=True)
+                niche_lower = site.get('niche_context', '').lower()
+                site_is_tech = any(w in niche_lower for w in [
+                    'ia ', 'inteligencia', 'prompt', 'claude', 'chatgpt', 'drone',
+                    'tech', 'software', 'automatiz', 'saas', 'herramienta', 'dron'
+                ])
                 article = generate_with_fallback(
                     keyword, site['niche_context'], name, groq_key,
-                    related_articles=related
+                    related_articles=related, is_tech=site_is_tech
                 )
                 print(f"OK")
                 print(f"        Titulo: {article['titulo_seo'][:60]}...")
