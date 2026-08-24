@@ -71,6 +71,90 @@ def send_alert(subject, body_html):
 # CHECK 1: WORDPRESS — artículos recientes
 # ─────────────────────────────────────────────
 
+SPAM_KEYWORDS = [
+    'casino','ruleta','tragamoneda','slot','poker','apuesta','lotería','loteria',
+    'blackjack','bingo','jackpot','bono casino','giros gratis','dinero real',
+    'juego online','bet365','betfair','codere','1xbet','sportingbet',
+    'sex','xxx','porn','escort','viagra','cialis','levitra','farmacia online',
+    'crypto','bitcoin','binance','forex','invertir ahora','ganar dinero fácil',
+    'hack','crack','nulled','warez','keygen','serial key',
+]
+
+LEGIT_ADMIN_EMAILS = [
+    'bengalasdehumo@gmail.com', 'espiacm@gmail.com', 'lafotocm@gmail.com'
+]
+
+def check_site_up(site):
+    """Verifica que el frontend responde 200."""
+    clean = site['url'].rstrip('/')
+    name  = site['name']
+    try:
+        r = requests.get(clean, timeout=10, allow_redirects=True)
+        if r.status_code == 200:
+            log(f'  ✓ {name}: frontend OK')
+            return True
+        else:
+            issues.append(f'ALERTA CAÍDA — {name}: frontend HTTP {r.status_code}')
+            return False
+    except Exception as e:
+        issues.append(f'ALERTA CAÍDA — {name}: sin respuesta — {e}')
+        return False
+
+def check_spam_injection(site):
+    """Detecta posts con keywords de spam/casino/hacking inyectados."""
+    name  = site['name']
+    clean = site['url'].rstrip('/')
+    auth  = (site['wp_user'], site['wp_password'])
+    spam_found = []
+    try:
+        r = requests.get(f'{clean}/wp-json/wp/v2/posts',
+            params={'per_page': 100, 'orderby': 'date', 'order': 'desc',
+                    '_fields': 'id,title,link', 'status': 'publish'},
+            auth=auth, timeout=20)
+        if not r.ok:
+            return
+        for post in r.json():
+            title = post.get('title', {}).get('rendered', '').lower()
+            if any(kw in title for kw in SPAM_KEYWORDS):
+                spam_found.append(f"ID:{post['id']} — {post['title']['rendered'][:60]}")
+        if spam_found:
+            issues.append(
+                f'🚨 HACK DETECTADO en {name}: {len(spam_found)} posts spam\n' +
+                '\n'.join(f'    {s}' for s in spam_found[:5])
+            )
+            log(f'  ⚠ SPAM DETECTADO en {name}: {len(spam_found)} posts')
+        else:
+            log(f'  ✓ {name}: sin spam detectado')
+    except Exception as e:
+        log(f'  Error check spam {name}: {e}')
+
+def check_admin_users(site):
+    """Detecta cuentas admin no autorizadas (posible backdoor del hacker)."""
+    name  = site['name']
+    clean = site['url'].rstrip('/')
+    auth  = (site['wp_user'], site['wp_password'])
+    try:
+        r = requests.get(f'{clean}/wp-json/wp/v2/users',
+            params={'roles': 'administrator', 'per_page': 20, '_fields': 'id,name,email,slug'},
+            auth=auth, timeout=15)
+        if not r.ok:
+            return
+        admins = r.json()
+        for u in admins:
+            email = u.get('email', u.get('slug', ''))
+            is_legit = any(e in str(email).lower() for e in LEGIT_ADMIN_EMAILS)
+            if not is_legit:
+                issues.append(
+                    f'🚨 USUARIO ADMIN SOSPECHOSO en {name}: '
+                    f'ID:{u["id"]} {u["name"]} <{email}>'
+                )
+                log(f'  ⚠ ADMIN SOSPECHOSO en {name}: {u["name"]} <{email}>')
+        if all(any(e in u.get('email',u.get('slug','')).lower() for e in LEGIT_ADMIN_EMAILS)
+               for u in admins):
+            log(f'  ✓ {name}: {len(admins)} admin(s) legítimo(s)')
+    except Exception as e:
+        log(f'  Error check admins {name}: {e}')
+
 def check_wordpress(site):
     name  = site['name']
     clean = site['url'].rstrip('/')
@@ -507,11 +591,19 @@ def main():
     log('\n[4] Pinterest...')
     check_pinterest()
 
-    # 5. WordPress
-    log('\n[5] WordPress...')
+    # 5. WordPress — publicación + seguridad
+    log('\n[5] WordPress — estado y publicación...')
     for site in config['sites']:
         log(f'\n  [{site["name"]}]')
         check_wordpress(site)
+
+    # 6b. Seguridad — uptime, spam, usuarios admin
+    log('\n[5b] SEGURIDAD — vigilancia activa todas las webs...')
+    for site in config['sites']:
+        log(f'\n  [{site["name"]}]')
+        check_site_up(site)
+        check_spam_injection(site)
+        check_admin_users(site)
 
     # 6. Analytics + generacion de contenido tendencia
     run_analytics_and_generate(groq_ok)

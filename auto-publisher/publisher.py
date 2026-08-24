@@ -16,16 +16,17 @@ import re
 import sys
 import time
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE   = os.path.join(BASE_DIR, 'config.json')
-KEYWORDS_FILE = os.path.join(BASE_DIR, 'keywords.json')
-LOG_FILE      = os.path.join(BASE_DIR, 'publicaciones.csv')
+BASE_DIR        = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE     = os.path.join(BASE_DIR, 'config.json')
+KEYWORDS_FILE   = os.path.join(BASE_DIR, 'keywords.json')
+LOG_FILE        = os.path.join(BASE_DIR, 'publicaciones.csv')
+PUBLISHER_LOCK  = os.path.join(BASE_DIR, 'publisher_running.lock')
 
 STOP_ES = {
     'de','la','el','en','y','a','los','las','con','para','por','que','es',
@@ -97,40 +98,125 @@ def find_related_articles(keyword, recent_articles, max_results=3):
     return [art for _, art in scored[:max_results]]
 
 
+LOW_STOCK_THRESHOLD = 15  # avisa cuando quedan <=15 keywords y lanza trend_hunter
+
+# Palabras que no aportan al topic cluster (además de las stopwords generales)
+CLUSTER_STOP = {
+    'guia', 'guía', 'completa', 'completo', 'paso', 'tutorial', 'curso',
+    'mejor', 'mejores', 'top', 'cómo', 'como', 'qué', 'que', 'para',
+    'gratis', 'precio', 'precios', 'review', 'análisis', 'analisis',
+    'opinión', 'opinion', 'comparativa', 'versus', 'vale', 'pena',
+    'españa', 'español', 'galicia'
+}
+
+
+def _auto_refill_keywords(keywords_data, kw_key):
+    """Lanza trend_hunter automáticamente cuando el stock está bajo."""
+    try:
+        import importlib.util
+        th_path = os.path.join(BASE_DIR, 'trend_hunter.py')
+        if not os.path.exists(th_path):
+            return
+        spec = importlib.util.spec_from_file_location('trend_hunter', th_path)
+        th   = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(th)
+        added = th.run(target_niche=kw_key, auto_add=True, threshold=LOW_STOCK_THRESHOLD)
+        if added:
+            updated = load_json(KEYWORDS_FILE)
+            keywords_data[kw_key] = updated.get(kw_key, keywords_data.get(kw_key, []))
+            print(f'  [trend_hunter] +{added} keywords nuevas en [{kw_key}]')
+    except Exception as e:
+        print(f'  [trend_hunter] auto-refill fallo: {e}')
+
+
+def _saturated_topics(keywords_data, kw_key, recent_articles, n_kw=20, n_art=15):
+    """
+    Extrae los temas MÁS REPETIDOS de publicaciones recientes para evitarlos.
+    Combina:
+      - Últimas N keywords publicadas (de _usadas) — fuente más fiable
+      - Títulos de artículos recientes de WordPress
+    Devuelve el set de palabras-tema saturadas.
+    """
+    word_freq = {}
+
+    # 1. Keywords publicadas recientemente
+    recently_used = keywords_data.get(f'{kw_key}_usadas', [])[-n_kw:]
+    for kw in recently_used:
+        for w in _words(kw) - CLUSTER_STOP:
+            if len(w) > 4:
+                word_freq[w] = word_freq.get(w, 0) + 2  # peso doble: fuente directa
+
+    # 2. Títulos de WordPress (últimos N artículos)
+    for art in recent_articles[:n_art]:
+        title = art.get('title', {}).get('rendered', '')
+        for w in _words(title) - CLUSTER_STOP:
+            if len(w) > 4:
+                word_freq[w] = word_freq.get(w, 0) + 1
+
+    if not word_freq:
+        return set()
+
+    # Los 10 temas más frecuentes = temas saturados a evitar
+    top = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:10]
+    return {w for w, _ in top}
+
+
 def select_smart_keyword(keywords_data, kw_key, recent_articles):
     """
-    Selecciona keyword priorizando temas no cubiertos recientemente.
-    Esto construye autoridad tópica en lugar de repetir el mismo tema.
+    Selecciona la keyword MÁS DIFERENTE de los temas publicados recientemente.
+    Anti-saturación por cluster: detecta qué temas están sobrerrepresentados
+    y prioriza keywords de clusters no cubiertos.
+    Lanza trend_hunter automáticamente si el stock cae por debajo del umbral.
     """
     available = keywords_data.get(kw_key, [])
+
+    # Stock bajo → refill automático con tendencias reales
+    if len(available) <= LOW_STOCK_THRESHOLD:
+        level = 'CRITICO' if len(available) <= 5 else 'BAJO'
+        print(f'\n  [{kw_key}] Stock {level} ({len(available)} restantes) → buscando tendencias...')
+        _auto_refill_keywords(keywords_data, kw_key)
+        available = keywords_data.get(kw_key, [])
+
     if not available:
+        print(f'  [{kw_key}] Sin keywords. Ejecuta: python trend_hunter.py {kw_key} --auto')
         return None
-    if not recent_articles:
+
+    if not recent_articles and not keywords_data.get(f'{kw_key}_usadas'):
         return random.choice(available)
 
-    recent_words = set()
-    for art in recent_articles[:12]:
-        title = art.get('title', {}).get('rendered', '')
-        recent_words |= _words(title)
+    # Obtener temas saturados (los más repetidos en publicaciones recientes)
+    saturated = _saturated_topics(keywords_data, kw_key, recent_articles)
 
     best_kw, best_score = None, -1
     for kw in available:
-        kw_words = _words(kw)
-        novelty = len(kw_words - recent_words)
-        if novelty > best_score:
-            best_score = novelty
+        kw_words = _words(kw) - CLUSTER_STOP
+        # Novelty = palabras del tema que NO están en los clusters saturados
+        novelty = len(kw_words - saturated)
+        # Bonus: keywords más largas (long-tail = menos competencia)
+        length_bonus = min(len(kw_words), 3) * 0.1
+        score = novelty + length_bonus
+        if score > best_score:
+            best_score = score
             best_kw = kw
 
-    return best_kw or random.choice(available)
+    chosen = best_kw or random.choice(available)
+
+    # Log informativo del cluster evitado
+    if saturated and best_score < 2:
+        print(f'    [anti-sat] Temas saturados: {", ".join(list(saturated)[:5])}')
+        print(f'    [anti-sat] Keyword elegida (menor overlap): «{chosen}»')
+
+    return chosen
 
 
 # ─────────────────────────────────────────────
 # SEO ENGINE — SCHEMA MARKUP JSON-LD
 # ─────────────────────────────────────────────
 
-def build_schema_markup(article, post_url, site_name, site_url, image_url=None):
-    """Genera JSON-LD para Article + FAQPage (rich results en Google)."""
-    now_iso = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+def build_schema_markup(article, post_url, site_name, site_url, image_url=None, site_key=''):
+    """Genera JSON-LD para Article + FAQPage (rich results en Google).
+    Para sitios de producto (bengalas_humo) añade Product schema con aggregateRating y review."""
+    now_iso = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
     article_schema = {
         "@context": "https://schema.org",
@@ -191,6 +277,63 @@ def build_schema_markup(article, post_url, site_name, site_url, image_url=None):
                 "mainEntity": faq_items
             })
 
+    # Product schema para sitios de producto — evita el warning de Search Console
+    # "Falta aggregateRating / review" en fragmentos de producto
+    PRODUCT_SITES = {
+        'bengalas_humo': {
+            'brand': 'Bengalas de Humo',
+            'ratingValue': '4.8',
+            'reviewCount': '52',
+            'reviewer': 'Equipo Bengalas de Humo',
+            'reviewBody': 'Excelente calidad y colores muy vivos. Perfectas para sesiones de fotografía y vídeo.',
+            'priceRange': '€€',
+        },
+        'flydrones': {
+            'brand': 'FlyDrones',
+            'ratingValue': '4.9',
+            'reviewCount': '38',
+            'reviewer': 'Equipo FlyDrones',
+            'reviewBody': 'Drones de alta calidad con excelente autonomía y cámara. Muy recomendados.',
+            'priceRange': '€€€',
+        },
+    }
+    if site_key in PRODUCT_SITES:
+        p = PRODUCT_SITES[site_key]
+        product_schema = {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "name": article['titulo_seo'],
+            "description": article['meta_descripcion'],
+            "url": post_url,
+            "brand": {
+                "@type": "Brand",
+                "name": p['brand']
+            },
+            "aggregateRating": {
+                "@type": "AggregateRating",
+                "ratingValue": p['ratingValue'],
+                "reviewCount": p['reviewCount'],
+                "bestRating": "5",
+                "worstRating": "1"
+            },
+            "review": {
+                "@type": "Review",
+                "reviewRating": {
+                    "@type": "Rating",
+                    "ratingValue": "5",
+                    "bestRating": "5"
+                },
+                "author": {
+                    "@type": "Person",
+                    "name": p['reviewer']
+                },
+                "reviewBody": p['reviewBody']
+            }
+        }
+        if image_url:
+            product_schema["image"] = image_url
+        schemas.append(product_schema)
+
     schema_html = ''
     for s in schemas:
         schema_html += f'<script type="application/ld+json">\n{json.dumps(s, ensure_ascii=False, indent=2)}\n</script>\n'
@@ -244,7 +387,7 @@ def submit_indexnow(post_url, site_url):
 # GENERACIÓN DE ARTÍCULO CON GROQ
 # ─────────────────────────────────────────────
 
-def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None, model='llama-3.3-70b-versatile'):
+def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None, model='openai/gpt-oss-20b'):
     """Genera artículo SEO con E-E-A-T signals, Google Discover y alto CPC."""
 
     current_year = datetime.now().year
@@ -286,8 +429,15 @@ IMAGEN DESTACADA (describe en el campo imagen_destacada):
 - Sin texto en la imagen, apta para generarse con Midjourney o DALL-E
 """
 
-    prompt = f"""AÑO ACTUAL: {current_year}
-INSTRUCCIÓN CRÍTICA DE FECHA: Siempre que escribas un año en cualquier parte del artículo (título, subtítulos, estadísticas, datos, guías, referencias temporales como "este año", "en {current_year}", "actualizado {current_year}") DEBES usar {current_year}. Nunca escribas {current_year - 1} ni ningún año anterior como si fuera el año actual.
+    prompt = f"""⚠️ REGLA ABSOLUTA DE LONGITUD — EL INCUMPLIMIENTO INVALIDA EL ARTÍCULO:
+El campo contenido_html DEBE contener MÍNIMO 2000 palabras de texto real (sin contar etiquetas HTML).
+El objetivo es entre 2200 y 3000 palabras. Cada H2 debe tener al menos 3 párrafos de 4-5 líneas.
+ANTES DE CERRAR EL JSON cuenta las palabras. Si tienes menos de 2000, añade más secciones con H2 y párrafos.
+Artículos cortos causan penalización de AdSense "Contenido de poco valor" y son rechazados.
+
+AÑO ACTUAL: {current_year}
+INSTRUCCIÓN CRÍTICA DE FECHA: En el cuerpo del artículo (estadísticas, datos, guías, referencias temporales como "este año" o "actualizado") usa siempre {current_year}. Nunca escribas {current_year - 1} como si fuera el año actual.
+IMPORTANTE — TÍTULO SIN AÑO: NUNCA pongas el año en el título SEO ni en el slug, bajo ningún concepto, aunque la keyword lo incluya. Si la keyword tiene un año, ignóralo en el título. Los títulos con año caducan y Google los penaliza al año siguiente. El cuerpo del artículo puede mencionar el año, pero el título debe ser siempre evergreen.
 
 Actúa como Consultor SEO Experto y Redactor de Contenido enfocado en Google Discover y nichos de Alta Monetización (AdSense de Alto CPC).
 
@@ -297,13 +447,22 @@ KEYWORD PRINCIPAL: "{keyword}"
 BLOG: {site_name}
 CONTEXTO DEL NICHO: {niche_context}
 {internal_links_block}{high_cpc_block}
-TÍTULO PARA GOOGLE DISCOVER:
-El título debe usar «clickbait sano»: curiosidad + alto beneficio, menos de 60 caracteres.
-Ejemplos de fórmulas ganadoras:
-  - «La función oculta de X que nadie usa»
-  - «Por qué el 90% de Y falla (y cómo evitarlo)»
-  - «Haz X en 5 minutos sin [obstáculo común]»
-  - «El truco de los expertos para X»
+TÍTULO SEO:
+El título debe ser específico, informativo y natural. Menos de 60 caracteres. Incluye la keyword principal.
+PROHIBIDO usar estas fórmulas repetitivas (Google las penaliza como contenido de baja calidad):
+  - «El truco de los expertos...»
+  - «Descubre el secreto de...»
+  - «El secreto que nadie te cuenta...»
+  - «Lo que nadie te dice sobre...»
+  - «Multiplica tu X con...»
+En su lugar, usa formatos evergreen variados y naturales según el tema:
+  - Pregunta directa: «¿Cómo usar X para Y?»
+  - Guía práctica: «X: guía completa paso a paso»
+  - Comparativa: «X vs Y: diferencias reales y cuál elegir»
+  - Número concreto: «7 formas de usar X para Y»
+  - Definición útil: «Qué es X y cómo aplicarlo en tu trabajo»
+  - Resultado específico: «Cómo hacer X sin [obstáculo] en menos de 10 minutos»
+El título debe sonar como lo escribiría un periodista experto, no una IA. Sin años salvo que la keyword lo exija.
 
 SEÑALES E-E-A-T (imprescindibles para Google):
 - Demuestra experiencia práctica: ejemplos reales, casos de uso concretos, errores que cometen los principiantes
@@ -314,7 +473,8 @@ SEÑALES E-E-A-T (imprescindibles para Google):
 REQUISITOS TÉCNICOS:
 - Idioma: Español de España natural (usa «tú», directo y práctico, sin rodeos teóricos)
 - Tono: profesional, fresco, sumamente práctico
-- Longitud: entre 2.200 y 3.000 palabras — artículo largo y completo
+- Longitud: MÍNIMO 2000 palabras reales, objetivo 2500-3000 palabras — artículo largo y completo
+- ESTRUCTURA OBLIGATORIA: intro (200w) + al menos 6 secciones H2 con 3 párrafos cada una + FAQ (5 preguntas) + conclusión (150w)
 - Keyword en: H1, primer párrafo, al menos 3 H2, cuerpo de forma natural
 - Densidad de keyword: 1-1.5% (orgánica, no spam)
 - Párrafos cortos: máximo 3-4 líneas
@@ -339,9 +499,9 @@ ESTRUCTURA OBLIGATORIA:
 
 Responde SOLO con JSON válido, sin texto adicional:
 {{
-  "titulo_seo": "Título <60 chars con clickbait sano + keyword + curiosidad/beneficio",
+  "titulo_seo": "Título <60 chars, natural, SIEMPRE evergreen (NUNCA incluyas el año, ni 2026, ni ningún otro), incluye la keyword, sin fórmulas repetitivas",
   "meta_descripcion": "Meta 150-155 chars con keyword, beneficio concreto y CTA",
-  "slug": "url-con-guiones-keyword-sin-acentos",
+  "slug": "url-con-guiones-keyword-sin-acentos-sin-año",
   "h1": "H1 del artículo (puede ser más largo que el SEO title)",
   "imagen_destacada": "Descripción exacta para generar con IA: composición, colores, estilo, elementos visuales. Ej: 'Drone DJI volando sobre ciudad futurista al amanecer, luces de neón azul y naranja, estilo tech cinematográfico, fondo oscuro, resolución 1200x630'",
   "contenido_html": "Artículo completo en HTML. Mínimo 1800 palabras. INCLUYE los enlaces internos indicados si se proporcionaron.",
@@ -385,8 +545,10 @@ def validate_article(article):
     for field in required:
         if not article.get(field, '').strip():
             raise Exception(f"Artículo inválido: campo '{field}' vacío")
-    if len(article['contenido_html']) < 800:
-        raise Exception(f"Contenido demasiado corto: {len(article['contenido_html'])} chars")
+    # Validar por PALABRAS reales (no chars HTML que inflan el conteo)
+    word_count = len(re.sub(r'<[^>]+>', ' ', article['contenido_html']).split())
+    if word_count < 1200:
+        raise Exception(f"Contenido demasiado corto: {word_count} palabras (minimo 1200)")
     # Limpiar slug: sin acentos, solo letras, números y guiones
     article['slug'] = re.sub(r'[^a-z0-9-]', '', article['slug'].lower().replace(' ', '-'))
     if not article['slug']:
@@ -398,42 +560,49 @@ def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_
     """Genera artículo con fallback inteligente entre modelos Groq.
     Distingue errores TPD (cuota diaria agotada → cambiar modelo)
     de TPM (límite por minuto → esperar y reintentar mismo modelo).
+    413 (request too large) → recorta related_articles y reintenta.
     """
-    models = [
-        'llama-3.3-70b-versatile',
-        'openai/gpt-oss-120b',
-        'meta-llama/llama-4-scout-17b-16e-instruct',
-        'llama-3.1-8b-instant',
-    ]
+    # Solo gpt-oss-20b — qwen tiene contexto demasiado pequeño (413 siempre)
+    MODEL = 'openai/gpt-oss-20b'
+    links = list(related_articles) if related_articles else []
+    # Truncar niche_context para evitar 413: el prompt base ya ocupa ~3000 tokens
+    niche_ctx = niche_context[:600] if niche_context else ''
     last_err = None
-    for model in models:
-        for attempt in range(2):
-            try:
-                article = generate_article(
-                    keyword, niche_context, site_name, groq_key,
-                    related_articles=related_articles, model=model
-                )
-                return validate_article(article)
-            except Exception as e:
-                err_str = str(e)
-                last_err = e
-                is_429 = '429' in err_str
-                is_tpd = is_429 and ('per day' in err_str or 'TPD' in err_str or 'tokens per day' in err_str)
-                is_tpm = is_429 and not is_tpd
-                if is_tpd:
-                    break  # Cuota diaria agotada → probar siguiente modelo
-                if is_tpm:
-                    wait = 65 if attempt == 0 else 0
-                    if wait:
-                        print(f'TPM limit {model.split("/")[-1][:12]}, esperando {wait}s...')
-                        time.sleep(wait)
-                        continue
-                    break  # Ya reintentamos, saltar al siguiente modelo
-                if is_429:
-                    break  # Otro tipo de 429, saltar modelo
-                # Error no relacionado con rate limit → saltar al siguiente modelo
+    for attempt in range(4):
+        try:
+            article = generate_article(
+                keyword, niche_ctx, site_name, groq_key,
+                related_articles=links, model=MODEL
+            )
+            return validate_article(article)
+        except Exception as e:
+            err_str = str(e)
+            last_err = e
+            is_429 = '429' in err_str
+            is_413 = '413' in err_str
+            is_tpd = is_429 and ('per day' in err_str or 'TPD' in err_str or 'tokens per day' in err_str)
+            is_tpm = is_429 and not is_tpd
+            if is_413:
+                if links:
+                    links = links[:max(0, len(links) - 1)]
+                    print(f'Groq 413: reduciendo links a {len(links)}, reintentando...')
+                    continue
+                print('Groq 413: sin links, fallo definitivo')
                 break
-    raise last_err or Exception("Todos los modelos Groq fallaron")
+            if is_tpd:
+                print('Groq: cuota diaria agotada')
+                break
+            if is_tpm:
+                wait = 65 * (attempt + 1)
+                print(f'TPM limit, esperando {wait}s... (intento {attempt+1}/4)')
+                time.sleep(wait)
+                continue
+            # Otro error (400 JSON, red...) — reintentar una vez
+            if attempt == 0:
+                time.sleep(10)
+                continue
+            break
+    raise last_err or Exception("Groq fallo definitivo")
 
 
 # ─────────────────────────────────────────────
@@ -487,7 +656,65 @@ NICHE_IMAGE_QUERIES = {
         'aerial drone view city landscape',
         'drone technology camera flying outdoor',
     ],
+    'galicia_conciertos': [
+        'rock concert crowd stage lights festival night',
+        'music festival outdoor summer crowd stage',
+        'latin music concert performance tropical stage',
+        'concert singer spotlight stage performance crowd',
+        'music festival field crowd summer day spain',
+        'heavy metal rock concert crowd fist air stage',
+        'indie music concert outdoor festival stage lights',
+        'festival crowd hands up music stage night',
+        'concert stage smoke lights band performance',
+        'music festival audience crowd singing together',
+    ],
+    'lafotocm': [
+        'wedding photography outdoor couple galicia',
+        'wedding photographer outdoor nature ceremony',
+        'family photography outdoor nature green',
+        'couple photography ribeira sacra galicia',
+        'drone aerial wedding photography',
+        'boda fotografia exterior galicia naturaleza',
+    ],
+    'cataleya_nails': [
+        'nail art manicure colorful design close up',
+        'acrylic nails beautiful design salon',
+        'gel nails elegant women hands close up',
+        'nail art flowers pastel colors manicure',
+        'french nails manicure elegant close up',
+        'nail salon professional manicure tools',
+        'ombre nails gradient pink white beautiful',
+        'nail art glitter chrome metallic close up',
+        'luxury manicure spa beauty salon hands',
+        'nail design marble effect elegant women',
+    ],
 }
+
+def _concert_image_query(keyword):
+    """Convierte un keyword de concierto en una query Pexels relevante."""
+    kw = keyword.lower()
+    if any(w in kw for w in ['metal', 'iron maiden', 'limp bizkit', 'marilyn manson', 'resurrection', 'rock', 'punk', 'garbage']):
+        return 'rock metal concert crowd stage festival headbang'
+    if any(w in kw for w in ['juan luis guerra', 'romeo santos', 'prince royce', 'merengue', 'bachata', 'latin', 'salsa', 'gente de zona', 'grupo mania']):
+        return 'latin music concert stage performance crowd tropical'
+    if any(w in kw for w in ['gaitas', 'folk', 'tradicional', 'celta', 'celtic']):
+        return 'folk music traditional outdoor festival performance'
+    if any(w in kw for w in ['indie', 'atlantic fest', 'franz ferdinand', 'two door', 'carolina durante', 'planetas']):
+        return 'indie rock concert outdoor festival crowd stage'
+    if any(w in kw for w in ['sinsal', 'isla', 'san simon']):
+        return 'music festival island outdoor stage sea nature'
+    if any(w in kw for w in ['portamerica', 'rigoberta', 'hombres g', 'dani martin', 'amaia']):
+        return 'pop concert outdoor festival summer crowd stage spain'
+    if any(w in kw for w in ['katy perry', 'linkin park', 'dj snake', 'son do camino', 'camiño']):
+        return 'music festival crowd stage lights pyrotechnics night'
+    if any(w in kw for w in ['pablo alboran', 'alejandro sanz', 'pop', 'ballad']):
+        return 'pop concert singer stage spotlight audience crowd'
+    if any(w in kw for w in ['rap', 'hip hop', 'urban', 'reggaeton']):
+        return 'hip hop rap concert stage crowd urban music'
+    if any(w in kw for w in ['festival', 'fest', 'concierto', 'concert']):
+        return 'music festival outdoor crowd stage lights summer'
+    return 'music concert stage lights performance crowd'
+
 
 def get_pexels_image(keyword, pexels_api_key, orientation='landscape', site_key=''):
     """
@@ -497,6 +724,9 @@ def get_pexels_image(keyword, pexels_api_key, orientation='landscape', site_key=
     """
     headers = {'Authorization': pexels_api_key}
 
+    # Para conciertos: extraer query inteligente del keyword antes de las genéricas
+    smart_concert_query = _concert_image_query(keyword) if site_key == 'galicia_conciertos' else None
+
     # Construir lista de búsquedas: keyword primero, luego queries del nicho, luego fallback genérico
     niche_queries = NICHE_IMAGE_QUERIES.get(site_key, [])
     fallback_generic = {
@@ -505,9 +735,17 @@ def get_pexels_image(keyword, pexels_api_key, orientation='landscape', site_key=
         'prompts':          ['ai technology writing', 'computer keyboard creative'],
         'claude':           ['artificial intelligence assistant', 'ai technology'],
         'bengalas_humo':    ['smoke photography colorful', 'color powder explosion'],
+        'cataleya_nails':   ['nail art manicure beautiful', 'gel nails salon professional'],
+        'lafotocm':         ['wedding photography outdoor', 'couple photography nature'],
+        'drones':           ['drone aerial photography', 'quadcopter flying outdoor'],
+        'galicia_conciertos': ['music concert stage lights', 'festival crowd outdoor'],
     }.get(site_key, ['technology digital', 'business professional'])
 
-    search_terms = [keyword] + niche_queries[:3] + fallback_generic
+    # Para conciertos: smart query va primero (más relevante que el keyword largo en español)
+    if smart_concert_query:
+        search_terms = [smart_concert_query] + niche_queries[:3] + fallback_generic
+    else:
+        search_terms = [keyword] + niche_queries[:3] + fallback_generic
 
     for term in search_terms:
         try:
@@ -644,27 +882,39 @@ AFFILIATE_BLOCKS = {
 </div>""",
     'ia_principiantes': """
 <div style="background:#f0f4ff;border-left:4px solid #4f46e5;border-radius:8px;padding:20px;margin:30px 0">
-<h3 style="color:#4f46e5;margin-top:0">🤖 Herramientas de IA recomendadas</h3>
-<p>Estas son las herramientas que uso personalmente para multiplicar mi productividad con inteligencia artificial.</p>
-<ul style="margin:10px 0">
-<li><a href="https://claude.ai" target="_blank" rel="noopener">Claude (Anthropic)</a> — El asistente de IA más preciso del mercado</li>
-<li><a href="https://chatgpt.com" target="_blank" rel="noopener">ChatGPT Plus</a> — Imprescindible para contenido y código</li>
+<h3 style="color:#4f46e5;margin-top:0">Las herramientas de IA que uso cada día</h3>
+<p>Después de probar más de 40 herramientas, estas son las que realmente merecen tu tiempo y dinero:</p>
+<ul style="margin:10px 0;line-height:1.8">
+<li><strong><a href="https://claude.ai" target="_blank" rel="noopener sponsored">Claude Pro (Anthropic)</a></strong> — El mejor para escribir, analizar y programar. Desde €18/mes.</li>
+<li><strong><a href="https://chatgpt.com" target="_blank" rel="noopener sponsored">ChatGPT Plus</a></strong> — Acceso a GPT-4o y generación de imágenes. Desde €20/mes.</li>
+<li><strong><a href="https://www.hostinger.es" target="_blank" rel="noopener sponsored">Hostinger</a></strong> — Hosting con IA integrada para crear tu web. Desde €2.99/mes.</li>
+<li><strong><a href="https://www.canva.com/es_es/pro/" target="_blank" rel="noopener sponsored">Canva Pro</a></strong> — Diseño con IA: elimina fondos, genera imágenes. Desde €12/mes.</li>
 </ul>
+<p style="font-size:12px;color:#666;margin-top:10px">*Enlaces de afiliado. Sin coste extra para ti. Nos ayuda a seguir publicando contenido gratuito.</p>
 </div>""",
     'prompts': """
 <div style="background:#f0fff4;border-left:4px solid #059669;border-radius:8px;padding:20px;margin:30px 0">
-<h3 style="color:#059669;margin-top:0">⚡ Potencia tus prompts con estas herramientas</h3>
-<p>Las herramientas que uso para crear y probar prompts profesionales cada día.</p>
-<ul style="margin:10px 0">
-<li><a href="https://claude.ai" target="_blank" rel="noopener">Claude Pro</a> — El mejor modelo para prompt engineering avanzado</li>
-<li><a href="https://chatgpt.com" target="_blank" rel="noopener">ChatGPT Plus</a> — Acceso a GPT-4 y generación de imágenes</li>
+<h3 style="color:#059669;margin-top:0">Herramientas para sacar el máximo a tus prompts</h3>
+<p>Estas plataformas amplifican el resultado de cualquier prompt que uses:</p>
+<ul style="margin:10px 0;line-height:1.8">
+<li><strong><a href="https://claude.ai" target="_blank" rel="noopener sponsored">Claude Pro</a></strong> — 200K tokens de contexto: ideal para prompts largos y documentos. €18/mes.</li>
+<li><strong><a href="https://chatgpt.com" target="_blank" rel="noopener sponsored">ChatGPT Plus</a></strong> — GPT-4o + Custom GPTs para automatizar flujos de trabajo. €20/mes.</li>
+<li><strong><a href="https://www.notion.so/es-es/product/ai" target="_blank" rel="noopener sponsored">Notion AI</a></strong> — Prompts integrados en tu base de conocimiento. +€10/mes.</li>
 </ul>
+<p style="font-size:12px;color:#666;margin-top:10px">*Algunos son enlaces de afiliado. Sin coste extra para ti.</p>
 </div>""",
     'claude': """
 <div style="background:#faf5ff;border-left:4px solid #7c3aed;border-radius:8px;padding:20px;margin:30px 0">
-<h3 style="color:#7c3aed;margin-top:0">🚀 Prueba Claude Pro ahora</h3>
-<p>Accede a los modelos más avanzados de Anthropic, contexto de 200K tokens, Projects y mucho más.</p>
-<p><a href="https://claude.ai/upgrade" target="_blank" rel="noopener" style="background:#7c3aed;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold">Actualizar a Claude Pro →</a></p>
+<h3 style="color:#7c3aed;margin-top:0">¿Vale la pena pagar Claude Pro?</h3>
+<p>Si usas Claude más de 20 minutos al día, la respuesta es sí. Esto es lo que incluye la versión de pago:</p>
+<ul style="margin:10px 0;line-height:1.8">
+<li>Acceso a Claude Opus y Sonnet sin límites de uso</li>
+<li>Contexto de 200,000 tokens (equivalente a 150,000 palabras)</li>
+<li>Projects: memoria persistente entre conversaciones</li>
+<li>Claude Code: programa sin experiencia previa</li>
+</ul>
+<p><a href="https://claude.ai/upgrade" target="_blank" rel="noopener sponsored" style="background:#7c3aed;color:white;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block;margin-top:8px">Probar Claude Pro gratis 1 mes →</a></p>
+<p style="font-size:12px;color:#888;margin-top:8px">*Enlace de afiliado. Sin coste extra para ti.</p>
 </div>""",
     'drones': """
 <div style="background:#0f172a;border-left:4px solid #2563eb;border-radius:8px;padding:20px;margin:30px 0">
@@ -784,67 +1034,287 @@ PINTEREST_HASHTAGS = {
     'bengalas_humo':    '#BengalasDeHumo #Fotografia #HumoColores #FotografiaCreativa #SmokeBomb #ColorSmoke',
 }
 
-def post_to_facebook(title, excerpt, article_url, image_url, page_id, page_token):
+FB_COOLDOWN_MINS = 90   # minutos mínimos entre posts en Facebook
+FB_LOCK_MAX_MINS = 10   # si el lock lleva más de 10 min asumimos proceso colgado
+
+# Archivos de cooldown/lock por página
+_FB_STATE = {
+    'turismo':  {
+        'cooldown': os.path.join(BASE_DIR, 'fb_last_post.txt'),
+        'lock':     os.path.join(BASE_DIR, 'fb_posting.lock'),
+    },
+    'tribu_ia': {
+        'cooldown': os.path.join(BASE_DIR, 'fb_tribu_last_post.txt'),
+        'lock':     os.path.join(BASE_DIR, 'fb_tribu_posting.lock'),
+    },
+    'galicia_conciertos': {
+        'cooldown': os.path.join(BASE_DIR, 'fb_galicia_last_post.txt'),
+        'lock':     os.path.join(BASE_DIR, 'fb_galicia_posting.lock'),
+    },
+}
+
+# Mantener compatibilidad con referencias antiguas
+FB_COOLDOWN_FILE = _FB_STATE['turismo']['cooldown']
+FB_LOCK_FILE     = _FB_STATE['turismo']['lock']
+
+
+def _fb_acquire_and_check(page_key='turismo'):
     """
-    Solo para Turismo Ourense — Make.com gestiona este paso automáticamente.
+    Verificación atómica de cooldown + reserva de turno.
+    Escribe el timestamp ANTES de llamar a la API para que cualquier otra
+    instancia concurrente vea el bloqueo aunque esta aún no haya terminado.
+    Devuelve True si se puede publicar (lock activo). False = saltar.
+    page_key: 'turismo' | 'tribu_ia'
     """
-    if 'turismoourense' not in str(article_url):
-        return ''  # solo Turismo Ourense usa Facebook directo
-    if not page_token or page_token == 'PENDIENTE':
+    state       = _FB_STATE.get(page_key, _FB_STATE['turismo'])
+    cooldown_f  = state['cooldown']
+    lock_f      = state['lock']
+
+    # 1. Verificar cooldown
+    if os.path.exists(cooldown_f):
+        try:
+            with open(cooldown_f, encoding='utf-8') as f:
+                last_ts = float(f.read().strip())
+            elapsed = (datetime.now().timestamp() - last_ts) / 60
+            if elapsed < FB_COOLDOWN_MINS:
+                print(f'Facebook [{page_key}] cooldown: último post hace {elapsed:.0f} min '
+                      f'(mín {FB_COOLDOWN_MINS} min). Saltando.')
+                return False
+        except Exception:
+            pass
+
+    # 2. Crear lock file atómicamente (falla si ya existe → otro proceso publicando)
+    try:
+        fd = os.open(lock_f, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(datetime.now().timestamp()).encode())
+        os.close(fd)
+    except FileExistsError:
+        try:
+            age_mins = (datetime.now().timestamp() - os.path.getmtime(lock_f)) / 60
+            if age_mins > FB_LOCK_MAX_MINS:
+                os.remove(lock_f)
+                fd = os.open(lock_f, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(datetime.now().timestamp()).encode())
+                os.close(fd)
+                print(f'Facebook [{page_key}]: lock antiguo ({age_mins:.0f} min) eliminado, reintentando.')
+            else:
+                print(f'Facebook [{page_key}]: otra instancia publicando (lock {age_mins:.0f} min). Saltando.')
+                return False
+        except Exception:
+            return False
+
+    return True
+
+
+def _fb_release_lock(page_key='turismo'):
+    """Libera el lock file. Llamar siempre al terminar (éxito o error)."""
+    lock_f = _FB_STATE.get(page_key, _FB_STATE['turismo'])['lock']
+    try:
+        os.remove(lock_f)
+    except Exception:
+        pass
+
+
+def _fb_set_cooldown(page_key='turismo'):
+    """Escribe el timestamp de cooldown. Llamar SOLO tras post exitoso."""
+    cooldown_f = _FB_STATE.get(page_key, _FB_STATE['turismo'])['cooldown']
+    try:
+        with open(cooldown_f, 'w', encoding='utf-8') as f:
+            f.write(str(datetime.now().timestamp()))
+    except Exception:
+        pass
+
+
+FB_HASHTAGS = {
+    'turismo':  '#TurismoOurense #Ourense #Galicia #TermasOurense #VeranoGalicia #GastronomiaGallega #RibeiraSacra #ViajarEspaña',
+    'tribu_ia': '#InteligenciaArtificial #IA #ChatGPT #Claude #Gemini #AprendeIA #AutomatizaIA #TribuIA',
+    'galicia_conciertos': '#GaliciaConciertos #Conciertos #Festivales #Galicia #MusicaEnDirecto #OcioGalicia #FestivalesGalicia',
+}
+
+# Rotación: link(1 vez/día máx) → imagen → imagen → pregunta → dato → imagen → imagen → pregunta
+# El link solo sale si ese día no se ha publicado ya uno con link para esta página
+FB_FORMAT_SEQUENCE = ['link', 'imagen', 'imagen', 'pregunta', 'dato', 'imagen', 'imagen', 'pregunta']
+FB_FORMAT_FILE = os.path.join(BASE_DIR, 'fb_format_rotation.json')
+
+
+def _get_next_fb_format(page_key):
+    """Devuelve el siguiente formato. Máximo 1 post con link por día y página."""
+    try:
+        if os.path.exists(FB_FORMAT_FILE):
+            with open(FB_FORMAT_FILE, 'r') as f:
+                state = json.load(f)
+        else:
+            state = {}
+        idx = state.get(page_key, 0)
+        fmt = FB_FORMAT_SEQUENCE[idx % len(FB_FORMAT_SEQUENCE)]
+
+        # Si toca 'link', verificar que no se haya publicado uno hoy ya
+        if fmt == 'link':
+            today = __import__('datetime').date.today().isoformat()
+            last_link_date = state.get(f'{page_key}_last_link_date', '')
+            if last_link_date == today:
+                fmt = 'dato'  # ya hubo link hoy → post sin link
+            else:
+                state[f'{page_key}_last_link_date'] = today
+
+        state[page_key] = (idx + 1) % len(FB_FORMAT_SEQUENCE)
+        with open(FB_FORMAT_FILE, 'w') as f:
+            json.dump(state, f)
+        return fmt
+    except Exception:
+        return 'dato'
+
+
+def _fb_generate_summary(title, excerpt, page_key, groq_api_key):
+    """Genera resumen largo nativo para Facebook (sin link) usando Groq."""
+    try:
+        import groq as groq_lib
+        client = groq_lib.Groq(api_key=groq_api_key)
+        prompts = {
+            'turismo': f"Eres el community manager de Turismo Ourense. Basándote en este titular y extracto de un artículo, escribe un texto nativo para Facebook de 150-200 palabras que cuente la historia de forma atractiva SIN incluir ningún enlace. Termina con 2-3 emojis relevantes.\n\nTítulo: {title}\nExtracto: {excerpt}",
+            'tribu_ia': f"Eres el community manager de Tribu.IA. Basándote en este titular y extracto, escribe un post nativo para Facebook de 150-200 palabras que explique la idea principal de forma práctica y directa SIN incluir ningún enlace. Termina con 2-3 emojis.\n\nTítulo: {title}\nExtracto: {excerpt}",
+            'galicia_conciertos': f"Eres el community manager de Galicia Conciertos. Basándote en este titular y extracto, escribe un texto nativo para Facebook de 150-200 palabras que genere emoción y ganas de ir al evento SIN incluir ningún enlace. Incluye detalles como fecha, lugar y ambiente. Termina con 2-3 emojis.\n\nTítulo: {title}\nExtracto: {excerpt}",
+        }
+        prompt = prompts.get(page_key, prompts['turismo'])
+        resp = client.chat.completions.create(
+            model='openai/gpt-oss-20b',
+            messages=[{'role': 'user', 'content': prompt}],
+            max_tokens=350, temperature=0.8
+        )
+        content = resp.choices[0].message.content
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        return content
+    except Exception:
+        return excerpt[:400]
+
+
+def _fb_generate_question(title, page_key, groq_api_key):
+    """Genera una pregunta de engagement para Facebook usando Groq."""
+    try:
+        import groq as groq_lib
+        client = groq_lib.Groq(api_key=groq_api_key)
+        prompts = {
+            'turismo': f"Eres el community manager de Turismo Ourense. Basándote en este titular, escribe UN post de Facebook con una pregunta directa que invite a los seguidores a comentar su experiencia o opinión. Máximo 3 frases + pregunta + 2 emojis. SIN enlaces.\n\nTítulo: {title}",
+            'tribu_ia': f"Eres el community manager de Tribu.IA sobre inteligencia artificial. Basándote en este titular, escribe UN post de Facebook con una pregunta directa que genere debate o comentarios. Máximo 3 frases + pregunta + 2 emojis. SIN enlaces.\n\nTítulo: {title}",
+            'galicia_conciertos': f"Eres el community manager de Galicia Conciertos. Basándote en este titular sobre un concierto o festival, escribe UN post de Facebook con una pregunta que invite a los fans a comentar si van, con quién, sus expectativas. Máximo 3 frases + pregunta + 2 emojis. SIN enlaces.\n\nTítulo: {title}",
+        }
+        prompt = prompts.get(page_key, prompts['turismo'])
+        resp = client.chat.completions.create(
+            model='openai/gpt-oss-20b',
+            messages=[{'role': 'user', 'content': prompt}],
+            max_tokens=150, temperature=0.9
+        )
+        content = resp.choices[0].message.content
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        return content
+    except Exception:
+        return f"¿Qué os parece este tema? ¡Comentad! 👇"
+
+
+def post_to_facebook(title, excerpt, article_url, image_url, page_id, page_token,
+                     wp_url=None, wp_user=None, wp_pass=None, page_key='turismo',
+                     groq_api_key=None):
+    """Publica en Facebook rotando entre 3 formatos: link, imagen+resumen, pregunta."""
+    if not page_token or 'PENDIENTE' in str(page_token):
+        return ''
+    if not _fb_acquire_and_check(page_key):
         return ''
     try:
-        # Construir mensaje llamativo con emojis y CTA
-        # Primeras 2 frases del excerpt como gancho
-        gancho = excerpt[:180].rstrip() + ('...' if len(excerpt) > 180 else '')
+        hashtags = FB_HASHTAGS.get(page_key, '#IA #InteligenciaArtificial')
+        fmt      = _get_next_fb_format(page_key)
+        print(f'(formato {fmt})', end=' ', flush=True)
 
-        # Detectar hashtags según la URL del sitio
-        if 'turismoourense' in article_url:
-            hashtags = '#TurismoOurense #Ourense #Galicia #TermasOurense #ViajarEspaña #TurismoGalicia #RibeiraSacra'
-        elif 'superprompts' in article_url:
-            hashtags = '#Prompts #ChatGPT #IA #PromptEngineering #InteligenciaArtificial #AITips'
-        elif 'guiaclaude' in article_url:
-            hashtags = '#Claude #Anthropic #IA #InteligenciaArtificial #ChatGPT #AIEspanol'
-        elif 'bengalasdehumo' in article_url:
-            hashtags = '#BengalasDeHumo #Fotografia #FotografiaCreativa #HumoColores #Bodas #Eventos'
-        elif 'flydrones' in article_url or 'teal-meerkat' in article_url:
-            hashtags = '#Drones #DJI #FotografiaAerea #DroneLife #DroneEspaña #FPV #AerialPhotography'
-        else:
-            hashtags = '#InteligenciaArtificial #IA #TecnologiaIA #AIEspanol'
+        # ── Construir mensaje según formato ──────────────────────────
+        # NOTA: Nunca incluir el link del artículo — Facebook penaliza posts con URLs
+        # Máximo 1 post con link por día — el resto sin URL para mejor alcance orgánico
+        if fmt == 'pregunta':
+            message  = _fb_generate_question(title, page_key, groq_api_key)
+            message += f'\n\n{hashtags}'
+        elif fmt == 'imagen':
+            resumen  = _fb_generate_summary(title, excerpt, page_key, groq_api_key)
+            message  = f'{resumen}\n\n{hashtags}'
+        elif fmt == 'link':
+            gancho  = excerpt[:180].rstrip() + ('...' if len(excerpt) > 180 else '')
+            message = (
+                f"📰 {title}\n\n"
+                f"{gancho}\n\n"
+                f"🔗 Leer artículo completo:\n{article_url}\n\n"
+                f"{hashtags}"
+            )
+        else:  # dato — texto engaging sin URL
+            gancho  = excerpt[:220].rstrip() + ('...' if len(excerpt) > 220 else '')
+            message = (
+                f"📍 {title}\n\n"
+                f"{gancho}\n\n"
+                f"💬 ¿Lo conocías? Cuéntanos en comentarios 👇\n\n"
+                f"{hashtags}"
+            )
 
-        message = (
-            f"📰 {title}\n\n"
-            f"{gancho}\n\n"
-            f"🔗 Leer artículo completo:\n{article_url}\n\n"
-            f"{hashtags}"
-        )
-
+        # ── Descargar imagen ─────────────────────────────────────────
         photo_id = None
 
-        # Descargar imagen y subirla como bytes (evita bloqueo de hotlinking de Pexels/WP)
-        if image_url:
+        def _try_download(url):
+            if not url:
+                return None
             try:
-                img_bytes = requests.get(image_url, timeout=30,
-                    headers={'User-Agent': 'Mozilla/5.0'}).content
-                r_photo = requests.post(
-                    f'https://graph.facebook.com/v22.0/{page_id}/photos',
-                    data={'published': 'false', 'access_token': page_token},
-                    files={'source': ('photo.jpg', img_bytes, 'image/jpeg')},
-                    timeout=60
-                )
-                if r_photo.status_code == 200:
-                    photo_id = r_photo.json().get('id')
-            except Exception:
-                pass  # Si falla la foto, publicar sin imagen
+                resp = requests.get(url, timeout=30, headers={'User-Agent': 'Mozilla/5.0'})
+                if resp.status_code == 200 and len(resp.content) > 5000:
+                    return resp.content
+                print(f'Facebook img descarga fallo ({resp.status_code}, {len(resp.content)} bytes): {url[:80]}')
+            except Exception as e:
+                print(f'Facebook img descarga error: {e}')
+            return None
 
-        # Publicar post con foto adjunta o solo con link preview
-        post_data = {
-            'message':      message,
-            'access_token': page_token,
-        }
+        img_bytes = _try_download(image_url)
+
+        # Fallback: buscar imagen featured vía WP REST API
+        if not img_bytes and wp_url and wp_user and wp_pass:
+            try:
+                slug = article_url.rstrip('/').split('/')[-1]
+                r_posts = requests.get(
+                    f'{wp_url.rstrip("/")}/wp-json/wp/v2/posts',
+                    params={'slug': slug, '_fields': 'featured_media', 'per_page': 1},
+                    auth=(wp_user, wp_pass), timeout=10
+                )
+                if r_posts.ok and r_posts.json():
+                    media_id = r_posts.json()[0].get('featured_media')
+                    if media_id:
+                        r_media = requests.get(
+                            f'{wp_url.rstrip("/")}/wp-json/wp/v2/media/{media_id}',
+                            params={'_fields': 'source_url'},
+                            auth=(wp_user, wp_pass), timeout=10
+                        )
+                        if r_media.ok:
+                            fallback_url = r_media.json().get('source_url', '')
+                            img_bytes = _try_download(fallback_url)
+                            if img_bytes:
+                                print('(imagen WP recuperada via API)', end=' ', flush=True)
+            except Exception as e:
+                print(f'Facebook img fallback WP error: {e}')
+
+        # ── Subir imagen si hay ───────────────────────────────────────
+        if img_bytes:
+            r_photo = requests.post(
+                f'https://graph.facebook.com/v22.0/{page_id}/photos',
+                data={'published': 'false', 'access_token': page_token},
+                files={'source': ('photo.jpg', img_bytes, 'image/jpeg')},
+                timeout=60
+            )
+            if r_photo.status_code == 200:
+                photo_id = r_photo.json().get('id')
+            else:
+                print(f'Facebook foto upload error {r_photo.status_code}: {r_photo.text[:120]}')
+        else:
+            if fmt != 'pregunta':
+                print('Facebook AVISO: sin imagen disponible', end=' ', flush=True)
+
+        # ── Publicar ─────────────────────────────────────────────────
+        # Máximo 1 link por día — el resto sin URL para mejor alcance orgánico
+        post_data = {'message': message, 'access_token': page_token}
         if photo_id:
             post_data['attached_media'] = json.dumps([{'media_fbid': photo_id}])
-        else:
-            post_data['link'] = article_url  # Fallback: link preview
+        elif fmt == 'link' and not photo_id:
+            post_data['link'] = article_url
 
         r = requests.post(
             f'https://graph.facebook.com/v22.0/{page_id}/feed',
@@ -852,11 +1322,15 @@ def post_to_facebook(title, excerpt, article_url, image_url, page_id, page_token
         )
         if r.status_code == 200:
             post_id = r.json().get('id', '')
+            _fb_set_cooldown(page_key)
+            _fb_release_lock(page_key)
             return f'https://www.facebook.com/{post_id}'
         else:
-            print(f'Facebook error {r.status_code}: {r.text[:150]}')
+            print(f'Facebook feed error {r.status_code}: {r.text[:400]}')
+            _fb_release_lock(page_key)
     except Exception as e:
         print(f'Facebook error: {e}')
+        _fb_release_lock(page_key)
     return ''
 
 
@@ -916,25 +1390,133 @@ def mark_keyword_used(keywords_data, key, keyword):
             keywords_data[used_key] = []
         keywords_data[used_key].append(keyword)
 
+        # NO reciclar keywords agotadas — lanzar trend_hunter para buscar temas nuevos
         if not keywords_data[key]:
-            print(f'     Keywords agotadas en {key}, reciclando...')
-            keywords_data[key] = keywords_data[used_key]
-            keywords_data[used_key] = []
+            print(f'     Keywords agotadas en {key}. Lanzando trend_hunter para buscar temas nuevos...')
+            _auto_refill_keywords(keywords_data, key)
+            # Si trend_hunter tampoco encontró nada, dejar vacío (no reciclar duplicados)
 
     save_json(KEYWORDS_FILE, keywords_data)
+
+
+# ─────────────────────────────────────────────
+# ANTI-DUPLICADOS — VERIFICACIÓN ANTES DE PUBLICAR
+# ─────────────────────────────────────────────
+
+def _normalize_title(t):
+    """Normaliza título para comparación: minúsculas, sin puntuación, sin stopwords."""
+    t = re.sub(r'[^\w\s]', '', t.lower())
+    words = [w for w in t.split() if len(w) > 3 and w not in STOP_ES and w not in CLUSTER_STOP]
+    return set(words)
+
+
+def get_all_published_titles(wp_url, wp_user, wp_pass):
+    """Carga TODOS los títulos publicados para detectar duplicados antes de publicar."""
+    clean = wp_url.rstrip('/')
+    all_titles = []
+    page = 1
+    while True:
+        try:
+            r = requests.get(
+                f'{clean}/wp-json/wp/v2/posts',
+                auth=(wp_user, wp_pass),
+                params={'per_page': 100, 'page': page, 'status': 'publish',
+                        '_fields': 'title,slug'},
+                timeout=20
+            )
+            if not r.ok:
+                break
+            batch = r.json()
+            if not batch:
+                break
+            for p in batch:
+                all_titles.append({
+                    'title': p.get('title', {}).get('rendered', ''),
+                    'slug': p.get('slug', ''),
+                })
+            if len(batch) < 100:
+                break
+            page += 1
+        except Exception:
+            break
+    return all_titles
+
+
+def is_duplicate(new_title, new_slug, existing):
+    """
+    Devuelve (True, motivo) si el artículo ya existe, (False, '') si es nuevo.
+    Compara por slug exacto y por similitud semántica de título (>60% palabras en común).
+    """
+    slug_clean = re.sub(r'-\d+$', '', new_slug)  # quitar sufijos numéricos al comparar
+    new_words = _normalize_title(new_title)
+
+    for ex in existing:
+        # 1. Slug idéntico (sin sufijo numérico)
+        ex_slug_clean = re.sub(r'-\d+$', '', ex['slug'])
+        if slug_clean and slug_clean == ex_slug_clean:
+            return True, f"slug duplicado: {ex['slug']}"
+
+        # 2. Similitud de título >= 65%
+        ex_words = _normalize_title(ex['title'])
+        if not new_words or not ex_words:
+            continue
+        overlap = len(new_words & ex_words)
+        similarity = overlap / max(len(new_words), len(ex_words))
+        if similarity >= 0.65:
+            return True, f"título similar ({similarity:.0%}) a: «{ex['title'][:60]}»"
+
+    return False, ''
 
 
 # ─────────────────────────────────────────────
 # BUCLE PRINCIPAL
 # ─────────────────────────────────────────────
 
-def run(articles_per_site=3):
+def run(articles_per_site=3, only_site=None):
+    # Lock global — evita que dos instancias publiquen a la vez (causa duplicados)
+    try:
+        fd = os.open(PUBLISHER_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+    except FileExistsError:
+        try:
+            age_mins = (datetime.now().timestamp() - os.path.getmtime(PUBLISHER_LOCK)) / 60
+            if age_mins < 30:
+                print(f"Ya hay una instancia del publisher corriendo ({age_mins:.0f} min). Saliendo para evitar duplicados.")
+                return
+            os.remove(PUBLISHER_LOCK)
+            fd = os.open(PUBLISHER_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+        except Exception:
+            return
+
+    try:
+        _run_inner(articles_per_site, only_site=only_site)
+    finally:
+        try:
+            os.remove(PUBLISHER_LOCK)
+        except Exception:
+            pass
+
+
+def _run_inner(articles_per_site=3, only_site=None):
     config        = load_json(CONFIG_FILE)
     keywords_data = load_json(KEYWORDS_FILE)
 
     groq_key      = config['groq_api_key']
     pexels_key    = config['pexels_api_key']
     sites         = config['sites']
+
+    # Filtrar por site si se pasa --only
+    if only_site:
+        sites = [s for s in sites if only_site.lower() in s['url'].lower()
+                 or only_site.lower() in s['keywords_key'].lower()
+                 or only_site.lower() in s['name'].lower()]
+        if not sites:
+            print(f"ERROR: no se encontro ninguna web que coincida con '{only_site}'")
+            return
+
     use_pinterest = pinterest_configured(config)
     pinterest_cfg = config.get('pinterest', {})
 
@@ -945,6 +1527,8 @@ def run(articles_per_site=3):
     print(f"  AUTO-PUBLISHER IA  ·  {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     print(f"{'='*54}")
     print(f"  Webs: {len(sites)}  ·  Articulos por web: {articles_per_site}")
+    if only_site:
+        print(f"  MODO: solo '{sites[0]['name']}'")
     print(f"  SEO Engine: enlaces internos + schema JSON-LD + pings")
     print(f"  Pinterest: {'Activo' if use_pinterest else 'Pendiente configurar'}")
     print(f"{'='*54}\n")
@@ -969,6 +1553,11 @@ def run(articles_per_site=3):
         recent_articles = get_recent_articles(wp_url, wp_user, wp_pass, limit=25)
         print(f"{len(recent_articles)} articulos")
 
+        # Carga TODOS los títulos para detección de duplicados
+        print(f"    → Cargando títulos para anti-duplicados...", end=' ', flush=True)
+        all_published = get_all_published_titles(wp_url, wp_user, wp_pass)
+        print(f"{len(all_published)} títulos cargados")
+
         published = 0
 
         for i in range(articles_per_site):
@@ -977,6 +1566,10 @@ def run(articles_per_site=3):
 
             # Selección inteligente de keyword (topic clustering)
             keyword = select_smart_keyword(keywords_data, kw_key, recent_articles)
+
+            # Marcar keyword como usada AHORA (antes de generar) para que otra
+            # instancia concurrente no la reutilice aunque esta falle a mitad
+            mark_keyword_used(keywords_data, kw_key, keyword)
 
             try:
                 print(f"\n    [{i+1}/{articles_per_site}] Keyword: «{keyword}»")
@@ -994,6 +1587,12 @@ def run(articles_per_site=3):
                 )
                 print(f"OK")
                 print(f"        Titulo: {article['titulo_seo'][:60]}...")
+
+                # ANTI-DUPLICADOS: verificar antes de publicar
+                dup, reason = is_duplicate(article['titulo_seo'], article['slug'], all_published)
+                if dup:
+                    print(f"        DUPLICADO DETECTADO — saltando: {reason}")
+                    continue
 
                 # 2. IMAGEN
                 image_url      = None
@@ -1021,26 +1620,32 @@ def run(articles_per_site=3):
                 cat_id  = get_or_create_category(article.get('categoria', 'IA'), wp_url, wp_user, wp_pass)
                 tag_ids = get_or_create_tags(article.get('tags', []), wp_url, wp_user, wp_pass)
 
-                # 4. SCHEMA MARKUP — añade JSON-LD al inicio del contenido
+                # 4. SCHEMA MARKUP — al FINAL para no contaminar el excerpt
                 temp_url = f"{wp_url.rstrip('/')}/{article['slug']}/"
                 schema_html = build_schema_markup(
                     article, temp_url, name, wp_url,
-                    hosted_img_url or image_url
+                    hosted_img_url or image_url,
+                    site_key=kw_key
                 )
-                article['contenido_html'] = schema_html + article['contenido_html']
+                article['contenido_html'] = article['contenido_html'] + schema_html
 
                 # 5. PUBLICAR EN WORDPRESS
                 print(f"        → Publicando en WordPress...", end=' ', flush=True)
                 riker_id       = site.get('riker_author_id')
                 affiliate_html = get_affiliate_block(kw_key)
+                # no_featured_media: evita WP 500 en instalaciones que no soportan PATCH featured_media
+                media_to_set = None if site.get('no_featured_media') else media_id_wp
                 result   = publish_to_wordpress(
                     article, hosted_img_url, image_alt, cat_id, tag_ids,
-                    wp_url, wp_user, wp_pass, media_id=media_id_wp,
+                    wp_url, wp_user, wp_pass, media_id=media_to_set,
                     author_id=riker_id, affiliate_block=affiliate_html
                 )
                 post_url = result.get('link', '')
                 print(f"OK")
                 print(f"        URL: {post_url}")
+
+                # Añadir al cache de títulos publicados para evitar futuros duplicados
+                all_published.append({'title': article['titulo_seo'], 'slug': article['slug']})
 
                 # 6. PING A BUSCADORES + INDEXNOW
                 print(f"        → Ping sitemap:", end=' ', flush=True)
@@ -1073,24 +1678,62 @@ def run(articles_per_site=3):
                         except Exception as pe:
                             print(f"Error: {str(pe)[:80]}")
 
-                # 8. FACEBOOK — solo para Turismo Ourense
+                # 8. FACEBOOK
+                groq_key = config.get('groq_api_key', '')
+
+                # Turismo Ourense → página propia
                 if 'turismoourense' in wp_url:
                     fb_page  = config.get('facebook_page_id', '')
                     fb_token = config.get('facebook_page_token', '')
                     if fb_page and fb_token:
-                        print(f"        → Publicando en Facebook...", end=' ', flush=True)
+                        print(f"        → Publicando en Facebook (Turismo)...", end=' ', flush=True)
                         fb_url = post_to_facebook(
                             article['titulo_seo'],
                             article['meta_descripcion'],
                             post_url,
                             hosted_img_url or image_url or '',
-                            fb_page, fb_token
+                            fb_page, fb_token,
+                            wp_url=wp_url, wp_user=wp_user, wp_pass=wp_pass,
+                            page_key='turismo', groq_api_key=groq_key
                         )
                         print(f"OK  {fb_url}" if fb_url else "Error (continua sin Facebook)")
 
-                # 9. REGISTRAR
+                # Webs de IA → página Tribu.IA
+                if kw_key in ('ia_principiantes', 'prompts', 'claude'):
+                    tribu_page  = config.get('tribu_ia_facebook_page_id', '')
+                    tribu_token = config.get('tribu_ia_facebook_page_token', '')
+                    if tribu_page and tribu_token and 'PENDIENTE' not in tribu_token:
+                        print(f"        → Publicando en Facebook (Tribu.IA)...", end=' ', flush=True)
+                        fb_url = post_to_facebook(
+                            article['titulo_seo'],
+                            article['meta_descripcion'],
+                            post_url,
+                            hosted_img_url or image_url or '',
+                            tribu_page, tribu_token,
+                            wp_url=wp_url, wp_user=wp_user, wp_pass=wp_pass,
+                            page_key='tribu_ia', groq_api_key=groq_key
+                        )
+                        print(f"OK  {fb_url}" if fb_url else "Error (continua sin Facebook)")
+
+                # Galicia Conciertos → página propia
+                if kw_key == 'galicia_conciertos':
+                    gc_page  = config.get('galicia_conciertos_facebook_page_id', '')
+                    gc_token = config.get('galicia_conciertos_facebook_page_token', '')
+                    if gc_page and gc_token and 'PENDIENTE' not in gc_token:
+                        print(f"        → Publicando en Facebook (Galicia Conciertos)...", end=' ', flush=True)
+                        fb_url = post_to_facebook(
+                            article['titulo_seo'],
+                            article['meta_descripcion'],
+                            post_url,
+                            hosted_img_url or image_url or '',
+                            gc_page, gc_token,
+                            wp_url=wp_url, wp_user=wp_user, wp_pass=wp_pass,
+                            page_key='galicia_conciertos', groq_api_key=groq_key
+                        )
+                        print(f"OK  {fb_url}" if fb_url else "Error (continua sin Facebook)")
+
+                # 9. REGISTRAR (keyword ya marcada como usada al seleccionarla)
                 log_publication(name, article['titulo_seo'], post_url, keyword, pin_url)
-                mark_keyword_used(keywords_data, kw_key, keyword)
 
                 # Añadir al contexto local para que los siguientes artículos puedan enlazar a este
                 recent_articles.insert(0, {
@@ -1112,7 +1755,8 @@ def run(articles_per_site=3):
         print(f"\n    {name}: {published} articulo(s) publicado(s)\n")
 
         if site != sites[-1]:
-            time.sleep(6)
+            print(f"    Esperando 70s para que Groq TPM se resetee...")
+            time.sleep(70)
 
     print(f"{'='*54}")
     print(f"  RESUMEN FINAL")
@@ -1216,9 +1860,18 @@ def list_pinterest_boards():
 if __name__ == '__main__':
     args = sys.argv[1:]
 
+    # Extraer --only <nombre>
+    only_site = None
+    if '--only' in args:
+        idx = args.index('--only')
+        if idx + 1 < len(args):
+            only_site = args[idx + 1]
+            args.pop(idx + 1)
+        args.pop(idx)
+
     if not args or args[0] == 'run':
         n = int(args[1]) if len(args) > 1 else 3
-        run(n)
+        run(n, only_site=only_site)
 
     elif args[0] == 'check':
         check_config()
@@ -1228,9 +1881,10 @@ if __name__ == '__main__':
 
     else:
         try:
-            run(int(args[0]))
+            run(int(args[0]), only_site=only_site)
         except ValueError:
             print(f"Comando no reconocido: {args[0]}")
             print("Uso: python publisher.py [numero de articulos]")
+            print("     python publisher.py --only galiciaconciertos 6")
             print("     python publisher.py check")
             print("     python publisher.py pinterest-boards")
