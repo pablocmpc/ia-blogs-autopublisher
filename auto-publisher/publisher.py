@@ -429,11 +429,9 @@ IMAGEN DESTACADA (describe en el campo imagen_destacada):
 - Sin texto en la imagen, apta para generarse con Midjourney o DALL-E
 """
 
-    prompt = f"""⚠️ REGLA ABSOLUTA DE LONGITUD — EL INCUMPLIMIENTO INVALIDA EL ARTÍCULO:
-El campo contenido_html DEBE contener MÍNIMO 2000 palabras de texto real (sin contar etiquetas HTML).
-El objetivo es entre 2200 y 3000 palabras. Cada H2 debe tener al menos 3 párrafos de 4-5 líneas.
-ANTES DE CERRAR EL JSON cuenta las palabras. Si tienes menos de 2000, añade más secciones con H2 y párrafos.
-Artículos cortos causan penalización de AdSense "Contenido de poco valor" y son rechazados.
+    prompt = f"""⚠️ REGLA DE LONGITUD:
+El campo contenido_html DEBE contener MÍNIMO 1200 palabras de texto real (sin contar etiquetas HTML).
+El objetivo es entre 1400 y 1800 palabras. Cada H2 debe tener al menos 2 párrafos de 3-4 líneas.
 
 AÑO ACTUAL: {current_year}
 INSTRUCCIÓN CRÍTICA DE FECHA: En el cuerpo del artículo (estadísticas, datos, guías, referencias temporales como "este año" o "actualizado") usa siempre {current_year}. Nunca escribas {current_year - 1} como si fuera el año actual.
@@ -473,8 +471,8 @@ SEÑALES E-E-A-T (imprescindibles para Google):
 REQUISITOS TÉCNICOS:
 - Idioma: Español de España natural (usa «tú», directo y práctico, sin rodeos teóricos)
 - Tono: profesional, fresco, sumamente práctico
-- Longitud: MÍNIMO 2000 palabras reales, objetivo 2500-3000 palabras — artículo largo y completo
-- ESTRUCTURA OBLIGATORIA: intro (200w) + al menos 6 secciones H2 con 3 párrafos cada una + FAQ (5 preguntas) + conclusión (150w)
+- Longitud: MÍNIMO 1200 palabras reales, objetivo 1400-1800 palabras — artículo completo y útil
+- ESTRUCTURA OBLIGATORIA: intro (150w) + al menos 4 secciones H2 con 2-3 párrafos cada una + FAQ (5 preguntas) + conclusión (100w)
 - Keyword en: H1, primer párrafo, al menos 3 H2, cuerpo de forma natural
 - Densidad de keyword: 1-1.5% (orgánica, no spam)
 - Párrafos cortos: máximo 3-4 líneas
@@ -504,7 +502,7 @@ Responde SOLO con JSON válido, sin texto adicional:
   "slug": "url-con-guiones-keyword-sin-acentos-sin-año",
   "h1": "H1 del artículo (puede ser más largo que el SEO title)",
   "imagen_destacada": "Descripción exacta para generar con IA: composición, colores, estilo, elementos visuales. Ej: 'Drone DJI volando sobre ciudad futurista al amanecer, luces de neón azul y naranja, estilo tech cinematográfico, fondo oscuro, resolución 1200x630'",
-  "contenido_html": "Artículo completo en HTML. Mínimo 1800 palabras. INCLUYE los enlaces internos indicados si se proporcionaron.",
+  "contenido_html": "Artículo completo en HTML. Mínimo 1200 palabras. INCLUYE los enlaces internos indicados si se proporcionaron.",
   "descripcion_pinterest": "140-160 chars: emoji + beneficio concreto + verbo de acción.",
   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
   "categoria": "Categoría 1-3 palabras"
@@ -518,7 +516,7 @@ Responde SOLO con JSON válido, sin texto adicional:
         'model': model,
         'messages': [{'role': 'user', 'content': prompt}],
         'temperature': 0.72,
-        'max_tokens': 6000,
+        'max_tokens': 3500,
         'response_format': {'type': 'json_object'}
     }
 
@@ -598,6 +596,11 @@ def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_
                 if links:
                     links = links[:max(0, len(links) - 1)]
                     print(f'Groq 413: reduciendo links a {len(links)}, reintentando...')
+                    continue
+                # Sin links pero sigue 413 → esperar TPM y reintentar
+                if attempt < 3:
+                    print(f'Groq 413: sin links, esperando 65s y reintentando...')
+                    time.sleep(65)
                     continue
                 print('Groq 413: sin links, fallo definitivo')
                 break
