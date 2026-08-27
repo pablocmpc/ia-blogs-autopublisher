@@ -390,7 +390,7 @@ def submit_indexnow(post_url, site_url):
 def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None, model='openai/gpt-oss-20b'):
     """Genera artículo SEO con E-E-A-T signals, Google Discover y alto CPC."""
 
-    current_year = datetime.now().year
+    current_year = datetime.now().year + 1  # Usar año siguiente para contenido evergreen
     internal_links_block = ""
     if related_articles:
         links_list = "\n".join(
