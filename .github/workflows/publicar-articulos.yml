@@ -1,16 +1,11 @@
-name: Publicar Artículos IA (7 turnos/día)
+name: Publicar Artículos IA (3 turnos/día)
 
-# Ejecuta 7 veces al día en horario español (UTC+2 en verano)
-# UTC times = hora española - 2
+# 3 ejecuciones diarias — 1 artículo por web = 9 artículos/run (dentro del límite de Groq)
 on:
   schedule:
-    - cron: '0 5 * * *'   # 07:00 España
-    - cron: '30 7 * * *'  # 09:30 España
-    - cron: '0 10 * * *'  # 12:00 España
-    - cron: '30 12 * * *' # 14:30 España
-    - cron: '0 15 * * *'  # 17:00 España
-    - cron: '30 17 * * *' # 19:30 España
-    - cron: '30 19 * * *' # 21:30 España
+    - cron: '0 7 * * *'   # 09:00 España
+    - cron: '0 13 * * *'  # 15:00 España
+    - cron: '0 19 * * *'  # 21:00 España
   workflow_dispatch:       # Permite ejecutar manualmente desde GitHub
 
 jobs:
