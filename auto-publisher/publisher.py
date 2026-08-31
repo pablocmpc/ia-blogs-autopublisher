@@ -387,7 +387,7 @@ def submit_indexnow(post_url, site_url):
 # GENERACIÓN DE ARTÍCULO CON GROQ
 # ─────────────────────────────────────────────
 
-def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None, model='openai/gpt-oss-20b'):
+def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None, model='openai/gpt-oss-20b', use_response_format=True):
     """Genera artículo SEO con E-E-A-T signals, Google Discover y alto CPC."""
 
     current_year = datetime.now().year + 1  # Usar año siguiente para contenido evergreen
@@ -517,8 +517,9 @@ Responde SOLO con JSON válido, sin texto adicional:
         'messages': [{'role': 'user', 'content': prompt}],
         'temperature': 0.72,
         'max_tokens': 3500,
-        'response_format': {'type': 'json_object'}
     }
+    if use_response_format:
+        payload['response_format'] = {'type': 'json_object'}
 
     resp = requests.post(
         'https://api.groq.com/openai/v1/chat/completions',
@@ -578,11 +579,12 @@ def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_
     # Truncar niche_context para evitar 413: el prompt base ya ocupa ~3000 tokens
     niche_ctx = niche_context[:600] if niche_context else ''
     last_err = None
+    use_fmt = True  # Intentar con response_format primero
     for attempt in range(4):
         try:
             article = generate_article(
                 keyword, niche_ctx, site_name, groq_key,
-                related_articles=links, model=MODEL
+                related_articles=links, model=MODEL, use_response_format=use_fmt
             )
             return validate_article(article, is_tech=is_tech)
         except Exception as e:
@@ -590,6 +592,7 @@ def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_
             last_err = e
             is_429 = '429' in err_str
             is_413 = '413' in err_str
+            is_400_json = '400' in err_str and 'JSON' in err_str
             is_tpd = is_429 and ('per day' in err_str or 'TPD' in err_str or 'tokens per day' in err_str)
             is_tpm = is_429 and not is_tpd
             if is_413:
@@ -612,7 +615,13 @@ def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_
                 print(f'TPM limit, esperando {wait}s... (intento {attempt+1}/4)')
                 time.sleep(wait)
                 continue
-            # Otro error (400 JSON, red...) — reintentar una vez
+            # Error 400 JSON validation — reintentar sin response_format
+            if is_400_json and use_fmt:
+                print(f'Groq 400 JSON: reintentando sin response_format...')
+                use_fmt = False
+                time.sleep(5)
+                continue
+            # Otro error (red...) — reintentar una vez
             if attempt == 0:
                 time.sleep(10)
                 continue
