@@ -41,7 +41,7 @@ STOP_ES = {
 # ─────────────────────────────────────────────
 
 def load_json(path):
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, 'r', encoding='utf-8-sig') as f:
         return json.load(f)
 
 def save_json(path, data):
@@ -1901,10 +1901,12 @@ if __name__ == '__main__':
 
     else:
         try:
-            run(int(args[0]), only_site=only_site)
+            n = int(args[0])
         except ValueError:
             print(f"Comando no reconocido: {args[0]}")
             print("Uso: python publisher.py [numero de articulos]")
             print("     python publisher.py --only galiciaconciertos 6")
             print("     python publisher.py check")
             print("     python publisher.py pinterest-boards")
+            sys.exit(1)
+        run(n, only_site=only_site)
