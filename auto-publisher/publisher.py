@@ -387,7 +387,7 @@ def submit_indexnow(post_url, site_url):
 # GENERACIÓN DE ARTÍCULO CON GROQ
 # ─────────────────────────────────────────────
 
-def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None, model='openai/gpt-oss-20b', use_response_format=True):
+def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None, model='llama-3.3-70b-versatile', use_response_format=True):
     """Genera artículo SEO con E-E-A-T signals, Google Discover y alto CPC."""
 
     current_year = datetime.now().year + 1  # Usar año siguiente para contenido evergreen
@@ -573,11 +573,10 @@ def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_
     de TPM (límite por minuto → esperar y reintentar mismo modelo).
     413 (request too large) → recorta related_articles y reintenta.
     """
-    # Solo gpt-oss-20b — qwen tiene contexto demasiado pequeño (413 siempre)
-    MODEL = 'openai/gpt-oss-20b'
+    # llama-3.3-70b tiene 128K contexto → no hay 413; maneja JSON mejor que gpt-oss-20b
+    MODEL = 'llama-3.3-70b-versatile'
     links = list(related_articles) if related_articles else []
-    # Truncar niche_context para evitar 413: el prompt base ya ocupa ~3000 tokens
-    niche_ctx = niche_context[:600] if niche_context else ''
+    niche_ctx = niche_context[:1200] if niche_context else ''
     last_err = None
     use_fmt = True  # Intentar con response_format primero
     for attempt in range(4):
@@ -1207,7 +1206,7 @@ def _fb_generate_summary(title, excerpt, page_key, groq_api_key):
         }
         prompt = prompts.get(page_key, prompts['turismo'])
         resp = client.chat.completions.create(
-            model='openai/gpt-oss-20b',
+            model='llama-3.3-70b-versatile',
             messages=[{'role': 'user', 'content': prompt}],
             max_tokens=350, temperature=0.8
         )
@@ -1230,7 +1229,7 @@ def _fb_generate_question(title, page_key, groq_api_key):
         }
         prompt = prompts.get(page_key, prompts['turismo'])
         resp = client.chat.completions.create(
-            model='openai/gpt-oss-20b',
+            model='llama-3.3-70b-versatile',
             messages=[{'role': 'user', 'content': prompt}],
             max_tokens=150, temperature=0.9
         )
