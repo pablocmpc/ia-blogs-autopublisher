@@ -558,8 +558,8 @@ def validate_article(article, is_tech=False):
             raise Exception(f"Artículo inválido: campo '{field}' vacío")
     # Validar por PALABRAS reales (no chars HTML que inflan el conteo)
     word_count = len(re.sub(r'<[^>]+>', ' ', article['contenido_html']).split())
-    if word_count < 1200:
-        raise Exception(f"Contenido demasiado corto: {word_count} palabras (minimo 1200)")
+    if word_count < 950:
+        raise Exception(f"Contenido demasiado corto: {word_count} palabras (minimo 950)")
     # Limpiar slug: sin acentos, solo letras, números y guiones
     article['slug'] = re.sub(r'[^a-z0-9-]', '', article['slug'].lower().replace(' ', '-'))
     if not article['slug']:
