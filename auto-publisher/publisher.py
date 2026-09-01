@@ -387,7 +387,7 @@ def submit_indexnow(post_url, site_url):
 # GENERACIÓN DE ARTÍCULO CON GROQ
 # ─────────────────────────────────────────────
 
-def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None, model='llama-3.3-70b-versatile', use_response_format=True):
+def generate_article(keyword, niche_context, site_name, groq_api_key, related_articles=None, model='openai/gpt-oss-120b', use_response_format=True):
     """Genera artículo SEO con E-E-A-T signals, Google Discover y alto CPC."""
 
     current_year = datetime.now().year + 1  # Usar año siguiente para contenido evergreen
@@ -573,8 +573,8 @@ def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_
     de TPM (límite por minuto → esperar y reintentar mismo modelo).
     413 (request too large) → recorta related_articles y reintenta.
     """
-    # llama-3.3-70b tiene 128K contexto → no hay 413; maneja JSON mejor que gpt-oss-20b
-    MODEL = 'llama-3.3-70b-versatile'
+    # gpt-oss-120b maneja JSON mejor que 20b; qwen3 como fallback
+    MODEL = 'openai/gpt-oss-120b'
     links = list(related_articles) if related_articles else []
     niche_ctx = niche_context[:1200] if niche_context else ''
     last_err = None
@@ -1206,7 +1206,7 @@ def _fb_generate_summary(title, excerpt, page_key, groq_api_key):
         }
         prompt = prompts.get(page_key, prompts['turismo'])
         resp = client.chat.completions.create(
-            model='llama-3.3-70b-versatile',
+            model='openai/gpt-oss-120b',
             messages=[{'role': 'user', 'content': prompt}],
             max_tokens=350, temperature=0.8
         )
@@ -1229,7 +1229,7 @@ def _fb_generate_question(title, page_key, groq_api_key):
         }
         prompt = prompts.get(page_key, prompts['turismo'])
         resp = client.chat.completions.create(
-            model='llama-3.3-70b-versatile',
+            model='openai/gpt-oss-120b',
             messages=[{'role': 'user', 'content': prompt}],
             max_tokens=150, temperature=0.9
         )
