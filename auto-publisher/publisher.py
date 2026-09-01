@@ -516,7 +516,7 @@ Responde SOLO con JSON válido, sin texto adicional:
         'model': model,
         'messages': [{'role': 'user', 'content': prompt}],
         'temperature': 0.72,
-        'max_tokens': 3500,
+        'max_tokens': 4500,
     }
     if use_response_format:
         payload['response_format'] = {'type': 'json_object'}
@@ -620,6 +620,12 @@ def generate_with_fallback(keyword, niche_context, site_name, groq_key, related_
                 print(f'Groq 400 JSON: reintentando sin response_format...')
                 use_fmt = False
                 time.sleep(5)
+                continue
+            # JSON truncado (Unterminated string) — reintentar
+            is_truncated = 'Unterminated string' in err_str or 'JSONDecodeError' in err_str
+            if is_truncated and attempt < 3:
+                print(f'JSON truncado, reintentando... (intento {attempt+1}/4)')
+                time.sleep(15)
                 continue
             # Otro error (red...) — reintentar una vez
             if attempt == 0:
